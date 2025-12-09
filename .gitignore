@@ -18,7 +18,7 @@ go.work
 vendor/
 
 # Go modules
-go.sum
+# go.sum - Keep this file, it's required for reproducible builds
 
 # Environment variables
 .env
