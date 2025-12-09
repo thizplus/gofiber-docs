@@ -68,10 +68,9 @@ type RateLimitConfig struct {
 }
 
 func LoadConfig() (*Config, error) {
-	err := godotenv.Load()
-	if err != nil {
-		return nil, err
-	}
+	// Load .env file if it exists (for local development)
+	// In production/Docker, environment variables are set by the container
+	_ = godotenv.Load()
 
 	redisDB, _ := strconv.Atoi(getEnv("REDIS_DB", "0"))
 
