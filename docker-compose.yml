@@ -1,0 +1,128 @@
+version: '3.8'
+
+services:
+  # ========================
+  # Backend API (GoFiber)
+  # ========================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stou-api
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Application
+      - APP_NAME=STOU Smart Tour API
+      - APP_PORT=8080
+      - APP_ENV=production
+      # Database
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=${DB_PASSWORD:-n147369}
+      - DB_NAME=${DB_NAME:-stou_smart_tour}
+      - DB_SSL_MODE=disable
+      # Redis
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
+      # JWT
+      - JWT_SECRET=${JWT_SECRET}
+      # Bunny Storage
+      - BUNNY_STORAGE_ZONE=${BUNNY_STORAGE_ZONE}
+      - BUNNY_ACCESS_KEY=${BUNNY_ACCESS_KEY}
+      - BUNNY_BASE_URL=${BUNNY_BASE_URL}
+      - BUNNY_CDN_URL=${BUNNY_CDN_URL}
+      # Google APIs
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GOOGLE_SEARCH_ENGINE_ID=${GOOGLE_SEARCH_ENGINE_ID}
+      - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
+      # OpenAI
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      # Rate Limiting
+      - RATE_LIMIT_SEARCH=100
+      - RATE_LIMIT_AI=50
+      - RATE_LIMIT_GENERAL=200
+    restart: unless-stopped
+    networks:
+      - stou-network
+
+  # ========================
+  # Frontend (Next.js)
+  # ========================
+  frontend:
+    build:
+      context: ../nextjs-doc
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://api:8080/api/v1
+    container_name: stou-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://localhost:8080/api/v1
+    restart: unless-stopped
+    networks:
+      - stou-network
+
+  # ========================
+  # PostgreSQL Database
+  # ========================
+  postgres:
+    image: postgres:15-alpine
+    container_name: stou-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-n147369}
+      POSTGRES_DB: ${DB_NAME:-stou_smart_tour}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${DB_NAME:-stou_smart_tour}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - stou-network
+
+  # ========================
+  # Redis Cache
+  # ========================
+  redis:
+    image: redis:7-alpine
+    container_name: stou-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - stou-network
+
+networks:
+  stou-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
