@@ -29,12 +29,12 @@ func NewUserService(userRepo repositories.UserRepository, jwtSecret string) serv
 func (s *UserServiceImpl) Register(ctx context.Context, req *dto.CreateUserRequest) (*models.User, error) {
 	existingUser, _ := s.userRepo.GetByEmail(ctx, req.Email)
 	if existingUser != nil {
-		return nil, errors.New("email already exists")
+		return nil, errors.New("อีเมลนี้ถูกใช้งานแล้ว")
 	}
 
 	existingUser, _ = s.userRepo.GetByUsername(ctx, req.Username)
 	if existingUser != nil {
-		return nil, errors.New("username already exists")
+		return nil, errors.New("ชื่อผู้ใช้นี้ถูกใช้งานแล้ว")
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -66,16 +66,16 @@ func (s *UserServiceImpl) Register(ctx context.Context, req *dto.CreateUserReque
 func (s *UserServiceImpl) Login(ctx context.Context, req *dto.LoginRequest) (string, *models.User, error) {
 	user, err := s.userRepo.GetByEmail(ctx, req.Email)
 	if err != nil {
-		return "", nil, errors.New("invalid email or password")
+		return "", nil, errors.New("อีเมลหรือรหัสผ่านไม่ถูกต้อง")
 	}
 
 	if !user.IsActive {
-		return "", nil, errors.New("account is disabled")
+		return "", nil, errors.New("บัญชีนี้ถูกระงับการใช้งาน")
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password))
 	if err != nil {
-		return "", nil, errors.New("invalid email or password")
+		return "", nil, errors.New("อีเมลหรือรหัสผ่านไม่ถูกต้อง")
 	}
 
 	token, err := s.GenerateJWT(user)
@@ -89,7 +89,7 @@ func (s *UserServiceImpl) Login(ctx context.Context, req *dto.LoginRequest) (str
 func (s *UserServiceImpl) GetProfile(ctx context.Context, userID uuid.UUID) (*models.User, error) {
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
-		return nil, errors.New("user not found")
+		return nil, errors.New("ไม่พบผู้ใช้งาน")
 	}
 	return user, nil
 }
@@ -97,7 +97,7 @@ func (s *UserServiceImpl) GetProfile(ctx context.Context, userID uuid.UUID) (*mo
 func (s *UserServiceImpl) UpdateProfile(ctx context.Context, userID uuid.UUID, req *dto.UpdateUserRequest) (*models.User, error) {
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
-		return nil, errors.New("user not found")
+		return nil, errors.New("ไม่พบผู้ใช้งาน")
 	}
 
 	if req.FirstName != "" {
@@ -160,7 +160,7 @@ func (s *UserServiceImpl) GenerateJWT(user *models.User) (string, error) {
 func (s *UserServiceImpl) ValidateJWT(tokenString string) (*models.User, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("unexpected signing method")
+			return nil, errors.New("รูปแบบ token ไม่ถูกต้อง")
 		}
 		return []byte(s.jwtSecret), nil
 	})
@@ -172,21 +172,21 @@ func (s *UserServiceImpl) ValidateJWT(tokenString string) (*models.User, error) 
 	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
 		userIDStr, ok := claims["user_id"].(string)
 		if !ok {
-			return nil, errors.New("invalid token claims")
+			return nil, errors.New("ข้อมูล token ไม่ถูกต้อง")
 		}
 
 		userID, err := uuid.Parse(userIDStr)
 		if err != nil {
-			return nil, errors.New("invalid user ID in token")
+			return nil, errors.New("รหัสผู้ใช้ใน token ไม่ถูกต้อง")
 		}
 
 		user, err := s.userRepo.GetByID(context.Background(), userID)
 		if err != nil {
-			return nil, errors.New("user not found")
+			return nil, errors.New("ไม่พบผู้ใช้งาน")
 		}
 
 		return user, nil
 	}
 
-	return nil, errors.New("invalid token")
+	return nil, errors.New("token ไม่ถูกต้อง")
 }
