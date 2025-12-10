@@ -10,6 +10,10 @@ func UserToUserResponse(user *models.User) *UserResponse {
 	if user == nil {
 		return nil
 	}
+	studentID := ""
+	if user.StudentID != nil {
+		studentID = *user.StudentID
+	}
 	return &UserResponse{
 		ID:        user.ID,
 		Email:     user.Email,
@@ -19,20 +23,24 @@ func UserToUserResponse(user *models.User) *UserResponse {
 		Avatar:    user.Avatar,
 		Role:      user.Role,
 		IsActive:  user.IsActive,
-		StudentID: user.StudentID,
+		StudentID: studentID,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 	}
 }
 
 func CreateUserRequestToUser(req *CreateUserRequest) *models.User {
+	var studentID *string
+	if req.StudentID != "" {
+		studentID = &req.StudentID
+	}
 	return &models.User{
 		Email:     req.Email,
 		Username:  req.Username,
 		Password:  req.Password,
 		FirstName: req.FirstName,
 		LastName:  req.LastName,
-		StudentID: req.StudentID,
+		StudentID: studentID,
 	}
 }
 

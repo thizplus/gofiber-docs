@@ -7,7 +7,7 @@ import (
 
 type User struct {
 	ID        uuid.UUID `gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
-	StudentID string    `gorm:"type:varchar(20);uniqueIndex"` // รหัสนักศึกษา มสธ.
+	StudentID *string   `gorm:"type:varchar(20);uniqueIndex"` // รหัสนักศึกษา มสธ. (NULL allowed for non-students)
 	Email     string    `gorm:"uniqueIndex;not null"`
 	Username  string    `gorm:"uniqueIndex;not null"`
 	Password  string    `gorm:"not null"`
