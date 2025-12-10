@@ -38,8 +38,18 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 		return utils.ErrorResponse(c, fiber.StatusBadRequest, "Registration failed", err)
 	}
 
-	userResponse := dto.UserToUserResponse(user)
-	return utils.SuccessResponse(c, "User registered successfully", userResponse)
+	// Generate token for auto-login after registration
+	token, err := h.userService.GenerateJWT(user)
+	if err != nil {
+		return utils.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to generate token", err)
+	}
+
+	// Return same format as login for auto-login
+	registerResponse := &dto.LoginResponse{
+		Token: token,
+		User:  *dto.UserToUserResponse(user),
+	}
+	return utils.SuccessResponse(c, "ลงทะเบียนสำเร็จ", registerResponse)
 }
 
 func (h *UserHandler) Login(c *fiber.Ctx) error {
