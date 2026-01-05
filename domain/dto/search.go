@@ -208,3 +208,71 @@ type GetSearchHistoryRequest struct {
 type ClearSearchHistoryRequest struct {
 	SearchType string `json:"searchType" validate:"omitempty,oneof=all website image video map ai"`
 }
+
+// ==================== Enhanced Place Detail DTOs ====================
+
+type PlaceDetailEnhancedResponse struct {
+	// Basic Info (same as PlaceDetailResponse)
+	PlaceID          string        `json:"placeId"`
+	Name             string        `json:"name"`
+	FormattedAddress string        `json:"formattedAddress"`
+	Lat              float64       `json:"lat"`
+	Lng              float64       `json:"lng"`
+	Rating           float64       `json:"rating"`
+	ReviewCount      int           `json:"reviewCount"`
+	PriceLevel       int           `json:"priceLevel,omitempty"`
+	Types            []string      `json:"types"`
+	Phone            string        `json:"phone,omitempty"`
+	Website          string        `json:"website,omitempty"`
+	GoogleMapsURL    string        `json:"googleMapsUrl"`
+	OpeningHours     []string      `json:"openingHours,omitempty"`
+	Reviews          []PlaceReview `json:"reviews,omitempty"`
+	Photos           []PlacePhoto  `json:"photos,omitempty"`
+	Distance         float64       `json:"distance,omitempty"`
+	DistanceText     string        `json:"distanceText,omitempty"`
+
+	// AI Status: "ready", "generating", "unavailable"
+	AIStatus string `json:"aiStatus"`
+
+	// AI Enhanced - NEW
+	AIOverview *AIPlaceOverview `json:"aiOverview,omitempty"`
+
+	// Related Videos - NEW
+	RelatedVideos []RelatedVideo `json:"relatedVideos,omitempty"`
+
+	// Guide Info - NEW
+	GuideInfo *PlaceGuideInfo `json:"guideInfo,omitempty"`
+}
+
+// AIPlaceOverview - AI generated overview for a place
+type AIPlaceOverview struct {
+	Summary         string   `json:"summary"`
+	History         string   `json:"history"`
+	Highlights      []string `json:"highlights"`
+	BestTimeToVisit string   `json:"bestTimeToVisit"`
+	Tips            []string `json:"tips"`
+	GeneratedAt     string   `json:"generatedAt"`
+}
+
+// PlaceGuideInfo - Info for tour guides
+type PlaceGuideInfo struct {
+	QuickFacts      []string   `json:"quickFacts"`
+	TalkingPoints   []string   `json:"talkingPoints"`
+	CommonQuestions []PlaceFAQ `json:"commonQuestions"`
+}
+
+// PlaceFAQ - Frequently asked question
+type PlaceFAQ struct {
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+}
+
+// RelatedVideo - Related YouTube video
+type RelatedVideo struct {
+	VideoID      string `json:"videoId"`
+	Title        string `json:"title"`
+	ThumbnailURL string `json:"thumbnailUrl"`
+	ChannelTitle string `json:"channelTitle"`
+	Duration     string `json:"duration,omitempty"`
+	ViewCount    int64  `json:"viewCount,omitempty"`
+}

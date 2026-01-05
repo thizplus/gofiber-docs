@@ -66,3 +66,30 @@ func (r *UserRepositoryImpl) Count(ctx context.Context) (int64, error) {
 	err := r.db.WithContext(ctx).Model(&models.User{}).Count(&count).Error
 	return count, err
 }
+
+func (r *UserRepositoryImpl) GetByGoogleID(ctx context.Context, googleID string) (*models.User, error) {
+	var user models.User
+	err := r.db.WithContext(ctx).Where("google_id = ?", googleID).First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *UserRepositoryImpl) GetByLineID(ctx context.Context, lineID string) (*models.User, error) {
+	var user models.User
+	err := r.db.WithContext(ctx).Where("line_id = ?", lineID).First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *UserRepositoryImpl) GetByStudentID(ctx context.Context, studentID string) (*models.User, error) {
+	var user models.User
+	err := r.db.WithContext(ctx).Where("student_id = ?", studentID).First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"mime/multipart"
 
 	"github.com/google/uuid"
 
@@ -29,4 +30,8 @@ type FolderService interface {
 
 	// Check item
 	CheckItemInFolders(ctx context.Context, userID uuid.UUID, url string) (*dto.CheckItemInFoldersResponse, error)
+	BatchCheckItemsInFolders(ctx context.Context, userID uuid.UUID, urls []string) (*dto.BatchCheckItemsResponse, error)
+
+	// Upload item
+	UploadItemToFolder(ctx context.Context, userID uuid.UUID, folderID uuid.UUID, file *multipart.FileHeader) (*dto.UploadItemResponse, error)
 }

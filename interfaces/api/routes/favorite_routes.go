@@ -15,5 +15,6 @@ func SetupFavoriteRoutes(api fiber.Router, h *handlers.Handlers) {
 	favorites.Get("/", h.FavoriteHandler.GetFavorites)
 	favorites.Delete("/:id", h.FavoriteHandler.RemoveFavorite)
 	favorites.Get("/check", h.FavoriteHandler.CheckFavorite)
+	favorites.Post("/check/batch", h.FavoriteHandler.BatchCheckFavorites)
 	favorites.Post("/toggle", h.FavoriteHandler.ToggleFavorite)
 }

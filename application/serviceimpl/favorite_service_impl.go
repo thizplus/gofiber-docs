@@ -143,6 +143,39 @@ func (s *FavoriteServiceImpl) CheckFavorite(ctx context.Context, userID uuid.UUI
 	return response, nil
 }
 
+func (s *FavoriteServiceImpl) BatchCheckFavorites(ctx context.Context, userID uuid.UUID, externalIDs []string) (*dto.BatchCheckFavoritesResponse, error) {
+	favorites, err := s.favoriteRepo.GetByUserIDAndExternalIDs(ctx, userID, externalIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a map of externalID -> favorite for quick lookup
+	favoriteMap := make(map[string]*models.Favorite)
+	for _, f := range favorites {
+		favoriteMap[f.ExternalID] = f
+	}
+
+	// Build response
+	response := &dto.BatchCheckFavoritesResponse{
+		Items: make(map[string]dto.CheckFavoriteResponse),
+	}
+
+	for _, extID := range externalIDs {
+		if fav, ok := favoriteMap[extID]; ok {
+			response.Items[extID] = dto.CheckFavoriteResponse{
+				IsFavorite: true,
+				FavoriteID: &fav.ID,
+			}
+		} else {
+			response.Items[extID] = dto.CheckFavoriteResponse{
+				IsFavorite: false,
+			}
+		}
+	}
+
+	return response, nil
+}
+
 func (s *FavoriteServiceImpl) ToggleFavorite(ctx context.Context, userID uuid.UUID, req *dto.AddFavoriteRequest) (*dto.CheckFavoriteResponse, error) {
 	checkReq := &dto.CheckFavoriteRequest{
 		Type:       req.Type,

@@ -2,9 +2,10 @@ package services
 
 import (
 	"context"
+
+	"github.com/google/uuid"
 	"gofiber-template/domain/dto"
 	"gofiber-template/domain/models"
-	"github.com/google/uuid"
 )
 
 type UserService interface {
@@ -16,4 +17,15 @@ type UserService interface {
 	ListUsers(ctx context.Context, offset, limit int) ([]*models.User, int64, error)
 	GenerateJWT(user *models.User) (string, error)
 	ValidateJWT(token string) (*models.User, error)
+
+	// Profile methods
+	UpdateProfileInfo(ctx context.Context, userID uuid.UUID, req *dto.UpdateProfileRequest) (*models.User, error)
+	UpdateAvatar(ctx context.Context, userID uuid.UUID, fileData []byte, contentType string) (*dto.UpdateAvatarResponse, error)
+	DeleteAvatar(ctx context.Context, userID uuid.UUID) error
+
+	// OAuth methods
+	GetGoogleAuthURL(state string) string
+	HandleGoogleCallback(ctx context.Context, code string, stateData dto.OAuthStateData) (string, *models.User, bool, error)
+	GetLineAuthURL(state string) string
+	HandleLineCallback(ctx context.Context, code string, stateData dto.OAuthStateData) (string, *models.User, bool, error)
 }

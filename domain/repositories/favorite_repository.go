@@ -21,4 +21,5 @@ type FavoriteRepository interface {
 	ExistsByUserIDAndExternalID(ctx context.Context, userID uuid.UUID, externalID string) (bool, error)
 	GetByUserIDAndURL(ctx context.Context, userID uuid.UUID, url string) (*models.Favorite, error)
 	GetByUserIDAndExternalID(ctx context.Context, userID uuid.UUID, externalID string) (*models.Favorite, error)
+	GetByUserIDAndExternalIDs(ctx context.Context, userID uuid.UUID, externalIDs []string) ([]*models.Favorite, error)
 }

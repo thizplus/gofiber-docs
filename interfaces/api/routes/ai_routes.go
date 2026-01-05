@@ -10,12 +10,14 @@ import (
 func SetupAIRoutes(api fiber.Router, h *handlers.Handlers) {
 	ai := api.Group("/ai")
 
-	// Public AI search (no authentication required, but history saved if logged in)
-	ai.Get("/search", middleware.OptionalAuth(), h.AIHandler.AISearch)
+	// All AI features require login
+	ai.Use(middleware.Protected())
 
-	// Protected AI chat endpoints
+	// AI search with summary
+	ai.Get("/search", h.AIHandler.AISearch)
+
+	// AI chat endpoints
 	chat := ai.Group("/chat")
-	chat.Use(middleware.Protected())
 	chat.Post("/", h.AIHandler.CreateChatSession)
 	chat.Get("/", h.AIHandler.GetChatSessions)
 	chat.Delete("/", h.AIHandler.ClearAllChatSessions)

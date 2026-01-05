@@ -2,8 +2,9 @@ package repositories
 
 import (
 	"context"
-	"gofiber-template/domain/models"
+
 	"github.com/google/uuid"
+	"gofiber-template/domain/models"
 )
 
 type UserRepository interface {
@@ -15,4 +16,11 @@ type UserRepository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, offset, limit int) ([]*models.User, error)
 	Count(ctx context.Context) (int64, error)
+
+	// OAuth methods
+	GetByGoogleID(ctx context.Context, googleID string) (*models.User, error)
+	GetByLineID(ctx context.Context, lineID string) (*models.User, error)
+
+	// Profile methods
+	GetByStudentID(ctx context.Context, studentID string) (*models.User, error)
 }

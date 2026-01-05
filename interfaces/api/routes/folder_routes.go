@@ -19,6 +19,7 @@ func SetupFolderRoutes(api fiber.Router, h *handlers.Handlers) {
 	protected.Post("/", h.FolderHandler.CreateFolder)
 	protected.Get("/", h.FolderHandler.GetFolders)
 	protected.Get("/items/check", h.FolderHandler.CheckItemInFolders)
+	protected.Post("/items/check/batch", h.FolderHandler.BatchCheckItemsInFolders)
 	protected.Get("/:id", h.FolderHandler.GetFolder)
 	protected.Put("/:id", h.FolderHandler.UpdateFolder)
 	protected.Delete("/:id", h.FolderHandler.DeleteFolder)
@@ -26,6 +27,7 @@ func SetupFolderRoutes(api fiber.Router, h *handlers.Handlers) {
 
 	// Folder items
 	protected.Post("/:id/items", h.FolderHandler.AddItemToFolder)
+	protected.Post("/:id/items/upload", h.FolderHandler.UploadItemToFolder)
 	protected.Get("/:id/items", h.FolderHandler.GetFolderItems)
 	protected.Put("/:id/items/reorder", h.FolderHandler.ReorderFolderItems)
 	protected.Put("/items/:itemId", h.FolderHandler.UpdateFolderItem)

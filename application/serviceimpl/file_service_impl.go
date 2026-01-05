@@ -21,10 +21,10 @@ import (
 type FileServiceImpl struct {
 	fileRepo repositories.FileRepository
 	userRepo repositories.UserRepository
-	storage  storage.BunnyStorage
+	storage  storage.R2Storage
 }
 
-func NewFileService(fileRepo repositories.FileRepository, userRepo repositories.UserRepository, storage storage.BunnyStorage) services.FileService {
+func NewFileService(fileRepo repositories.FileRepository, userRepo repositories.UserRepository, storage storage.R2Storage) services.FileService {
 	return &FileServiceImpl{
 		fileRepo: fileRepo,
 		userRepo: userRepo,

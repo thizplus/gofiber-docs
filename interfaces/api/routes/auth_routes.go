@@ -7,6 +7,16 @@ import (
 
 func SetupAuthRoutes(api fiber.Router, h *handlers.Handlers) {
 	auth := api.Group("/auth")
-	auth.Post("/register", h.UserHandler.Register)
-	auth.Post("/login", h.UserHandler.Login)
+
+	// Traditional auth (disabled for social-only login)
+	// auth.Post("/register", h.UserHandler.Register)
+	// auth.Post("/login", h.UserHandler.Login)
+
+	// Google OAuth
+	auth.Get("/google", h.UserHandler.GoogleAuth)
+	auth.Get("/google/callback", h.UserHandler.GoogleCallback)
+
+	// LINE OAuth
+	auth.Get("/line", h.UserHandler.LineAuth)
+	auth.Get("/line/callback", h.UserHandler.LineCallback)
 }

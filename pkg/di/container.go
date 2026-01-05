@@ -16,6 +16,7 @@ import (
 	"gofiber-template/infrastructure/storage"
 	"gofiber-template/interfaces/api/handlers"
 	"gofiber-template/pkg/config"
+	"gofiber-template/pkg/oauth"
 	"gofiber-template/pkg/scheduler"
 )
 
@@ -26,7 +27,7 @@ type Container struct {
 	// Infrastructure
 	DB             *gorm.DB
 	RedisClient    *redis.RedisClient
-	BunnyStorage   storage.BunnyStorage
+	R2Storage      storage.R2Storage
 	EventScheduler scheduler.EventScheduler
 
 	// External API Clients
@@ -45,8 +46,9 @@ type Container struct {
 	FolderItemRepository    repositories.FolderItemRepository
 	FavoriteRepository      repositories.FavoriteRepository
 	SearchHistoryRepository repositories.SearchHistoryRepository
-	AIChatSessionRepository repositories.AIChatSessionRepository
-	AIChatMessageRepository repositories.AIChatMessageRepository
+	AIChatSessionRepository    repositories.AIChatSessionRepository
+	AIChatMessageRepository    repositories.AIChatMessageRepository
+	PlaceAIContentRepository   repositories.PlaceAIContentRepository
 
 	// Services
 	UserService     services.UserService
@@ -138,15 +140,21 @@ func (c *Container) initInfrastructure() error {
 		log.Println("✓ Redis connected")
 	}
 
-	// Initialize Bunny Storage
-	bunnyConfig := storage.BunnyConfig{
-		StorageZone: c.Config.Bunny.StorageZone,
-		AccessKey:   c.Config.Bunny.AccessKey,
-		BaseURL:     c.Config.Bunny.BaseURL,
-		CDNUrl:      c.Config.Bunny.CDNUrl,
+	// Initialize Cloudflare R2 Storage
+	r2Config := storage.R2Config{
+		AccountID:       c.Config.R2.AccountID,
+		AccessKeyID:     c.Config.R2.AccessKeyID,
+		SecretAccessKey: c.Config.R2.SecretAccessKey,
+		Bucket:          c.Config.R2.Bucket,
+		PublicURL:       c.Config.R2.PublicURL,
 	}
-	c.BunnyStorage = storage.NewBunnyStorage(bunnyConfig)
-	log.Println("✓ Bunny Storage initialized")
+	r2Storage, err := storage.NewR2Storage(r2Config)
+	if err != nil {
+		log.Printf("Warning: R2 Storage initialization failed: %v", err)
+	} else {
+		c.R2Storage = r2Storage
+		log.Println("✓ Cloudflare R2 Storage initialized")
+	}
 
 	// Initialize External API Clients
 	if err := c.initExternalClients(); err != nil {
@@ -174,6 +182,11 @@ func (c *Container) initExternalClients() error {
 	c.OpenAIClient = openai.NewAIClient(c.Config.OpenAI.APIKey, c.Config.OpenAI.Model)
 	log.Println("✓ OpenAI client initialized")
 
+	// Initialize OAuth Clients
+	oauth.InitGoogleOAuth()
+	oauth.InitLineOAuth()
+	log.Println("✓ OAuth clients initialized")
+
 	return nil
 }
 
@@ -190,22 +203,25 @@ func (c *Container) initRepositories() error {
 	c.SearchHistoryRepository = postgres.NewSearchHistoryRepository(c.DB)
 	c.AIChatSessionRepository = postgres.NewAIChatSessionRepository(c.DB)
 	c.AIChatMessageRepository = postgres.NewAIChatMessageRepository(c.DB)
+	c.PlaceAIContentRepository = postgres.NewPlaceAIContentRepository(c.DB)
 
 	log.Println("✓ Repositories initialized")
 	return nil
 }
 
 func (c *Container) initServices() error {
-	c.UserService = serviceimpl.NewUserService(c.UserRepository, c.Config.JWT.Secret)
+	c.UserService = serviceimpl.NewUserService(c.UserRepository, c.Config.JWT.Secret, c.R2Storage, c.Config.R2.PublicURL)
 	c.TaskService = serviceimpl.NewTaskService(c.TaskRepository, c.UserRepository)
-	c.FileService = serviceimpl.NewFileService(c.FileRepository, c.UserRepository, c.BunnyStorage)
+	c.FileService = serviceimpl.NewFileService(c.FileRepository, c.UserRepository, c.R2Storage)
 
 	// STOU Smart Tour services
 	c.SearchService = serviceimpl.NewSearchService(
 		c.SearchHistoryRepository,
+		c.PlaceAIContentRepository,
 		c.GoogleSearchClient,
 		c.GooglePlacesClient,
 		c.GoogleYouTubeClient,
+		c.OpenAIClient,
 		c.RedisClient.GetClient(),
 	)
 
@@ -221,6 +237,7 @@ func (c *Container) initServices() error {
 	c.FolderService = serviceimpl.NewFolderService(
 		c.FolderRepository,
 		c.FolderItemRepository,
+		c.R2Storage,
 	)
 
 	c.FavoriteService = serviceimpl.NewFavoriteService(c.FavoriteRepository)

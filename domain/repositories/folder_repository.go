@@ -35,4 +35,5 @@ type FolderItemRepository interface {
 	ReorderItems(ctx context.Context, folderID uuid.UUID, itemOrders map[uuid.UUID]int) error
 	ExistsByFolderIDAndURL(ctx context.Context, folderID uuid.UUID, url string) (bool, error)
 	GetFolderIDsByURL(ctx context.Context, userID uuid.UUID, url string) ([]uuid.UUID, error)
+	GetFolderIDsByURLs(ctx context.Context, userID uuid.UUID, urls []string) (map[string][]uuid.UUID, error)
 }

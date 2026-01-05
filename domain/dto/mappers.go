@@ -6,41 +6,13 @@ import (
 	"gofiber-template/domain/models"
 )
 
-func UserToUserResponse(user *models.User) *UserResponse {
-	if user == nil {
-		return nil
-	}
-	studentID := ""
-	if user.StudentID != nil {
-		studentID = *user.StudentID
-	}
-	return &UserResponse{
-		ID:        user.ID,
-		Email:     user.Email,
-		Username:  user.Username,
-		FirstName: user.FirstName,
-		LastName:  user.LastName,
-		Avatar:    user.Avatar,
-		Role:      user.Role,
-		IsActive:  user.IsActive,
-		StudentID: studentID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-	}
-}
-
 func CreateUserRequestToUser(req *CreateUserRequest) *models.User {
-	var studentID *string
-	if req.StudentID != "" {
-		studentID = &req.StudentID
-	}
 	return &models.User{
 		Email:     req.Email,
 		Username:  req.Username,
 		Password:  req.Password,
 		FirstName: req.FirstName,
 		LastName:  req.LastName,
-		StudentID: studentID,
 	}
 }
 

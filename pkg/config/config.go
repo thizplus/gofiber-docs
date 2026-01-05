@@ -11,7 +11,7 @@ type Config struct {
 	Database  DatabaseConfig
 	Redis     RedisConfig
 	JWT       JWTConfig
-	Bunny     BunnyConfig
+	R2        R2Config
 	Google    GoogleConfig
 	OpenAI    OpenAIConfig
 	RateLimit RateLimitConfig
@@ -43,11 +43,12 @@ type JWTConfig struct {
 	Secret string
 }
 
-type BunnyConfig struct {
-	StorageZone string
-	AccessKey   string
-	BaseURL     string
-	CDNUrl      string
+type R2Config struct {
+	AccountID       string
+	AccessKeyID     string
+	SecretAccessKey string
+	Bucket          string
+	PublicURL       string
 }
 
 type GoogleConfig struct {
@@ -97,11 +98,12 @@ func LoadConfig() (*Config, error) {
 		JWT: JWTConfig{
 			Secret: getEnv("JWT_SECRET", "your-secret-key"),
 		},
-		Bunny: BunnyConfig{
-			StorageZone: getEnv("BUNNY_STORAGE_ZONE", ""),
-			AccessKey:   getEnv("BUNNY_ACCESS_KEY", ""),
-			BaseURL:     getEnv("BUNNY_BASE_URL", "https://storage.bunnycdn.com"),
-			CDNUrl:      getEnv("BUNNY_CDN_URL", ""),
+		R2: R2Config{
+			AccountID:       getEnv("R2_ACCOUNT_ID", ""),
+			AccessKeyID:     getEnv("R2_ACCESS_KEY_ID", ""),
+			SecretAccessKey: getEnv("R2_SECRET_ACCESS_KEY", ""),
+			Bucket:          getEnv("R2_BUCKET", ""),
+			PublicURL:       getEnv("R2_PUBLIC_URL", ""),
 		},
 		Google: GoogleConfig{
 			APIKey:         getEnv("GOOGLE_API_KEY", ""),

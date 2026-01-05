@@ -25,6 +25,7 @@ type SearchService interface {
 	// Place search (Google Places)
 	SearchPlaces(ctx context.Context, userID uuid.UUID, req *dto.PlaceSearchRequest) (*dto.PlaceSearchResponse, error)
 	GetPlaceDetails(ctx context.Context, placeID string, userLat, userLng float64) (*dto.PlaceDetailResponse, error)
+	GetPlaceDetailsEnhanced(ctx context.Context, placeID string, userLat, userLng float64, includeAI bool) (*dto.PlaceDetailEnhancedResponse, error)
 	SearchNearbyPlaces(ctx context.Context, req *dto.NearbyPlacesRequest) (*dto.PlaceSearchResponse, error)
 
 	// Search history

@@ -139,6 +139,29 @@ func (h *SearchHandler) GetPlaceDetails(c *fiber.Ctx) error {
 	return utils.SuccessResponse(c, "Place details retrieved", result)
 }
 
+// GetPlaceDetailsEnhanced returns place details with AI-generated content
+// includeAI=true only works for authenticated users
+func (h *SearchHandler) GetPlaceDetailsEnhanced(c *fiber.Ctx) error {
+	placeID := c.Params("placeId")
+	if placeID == "" {
+		return utils.ValidationErrorResponse(c, "Place ID is required")
+	}
+
+	userLat := c.QueryFloat("lat", 0)
+	userLng := c.QueryFloat("lng", 0)
+
+	// Check if user is authenticated for AI features
+	_, userErr := utils.GetUserFromContext(c)
+	includeAI := userErr == nil // Only include AI for authenticated users
+
+	result, err := h.searchService.GetPlaceDetailsEnhanced(c.Context(), placeID, userLat, userLng, includeAI)
+	if err != nil {
+		return utils.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to get enhanced place details", err)
+	}
+
+	return utils.SuccessResponse(c, "Enhanced place details retrieved", result)
+}
+
 func (h *SearchHandler) SearchNearbyPlaces(c *fiber.Ctx) error {
 	var req dto.NearbyPlacesRequest
 	if err := c.QueryParser(&req); err != nil {

@@ -10,17 +10,22 @@ import (
 func SetupSearchRoutes(api fiber.Router, h *handlers.Handlers) {
 	search := api.Group("/search")
 
-	// Public search endpoints (no authentication required, but history saved if logged in)
-	search.Get("/", middleware.OptionalAuth(), h.SearchHandler.Search)
-	search.Get("/websites", middleware.OptionalAuth(), h.SearchHandler.SearchWebsites)
-	search.Get("/images", middleware.OptionalAuth(), h.SearchHandler.SearchImages)
-	search.Get("/videos", middleware.OptionalAuth(), h.SearchHandler.SearchVideos)
-	search.Get("/videos/:videoId", h.SearchHandler.GetVideoDetails)
-	search.Get("/places", middleware.OptionalAuth(), h.SearchHandler.SearchPlaces)
-	search.Get("/places/:placeId", h.SearchHandler.GetPlaceDetails)
-	search.Get("/nearby", h.SearchHandler.SearchNearbyPlaces)
+	// Initialize guest rate limiter
+	guestLimiter := middleware.NewGuestRateLimitMiddleware(middleware.DefaultGuestRateLimitConfig())
 
-	// Protected search history endpoints
+	// Public search endpoints with guest rate limiting
+	// OptionalAuth allows logged users to save search history
+	search.Get("/", middleware.OptionalAuth(), guestLimiter.GuestSearchLimit(), h.SearchHandler.Search)
+	search.Get("/websites", middleware.OptionalAuth(), guestLimiter.GuestSearchLimit(), h.SearchHandler.SearchWebsites)
+	search.Get("/images", middleware.OptionalAuth(), guestLimiter.GuestMediaLimit(), h.SearchHandler.SearchImages)
+	search.Get("/videos", middleware.OptionalAuth(), guestLimiter.GuestMediaLimit(), h.SearchHandler.SearchVideos)
+	search.Get("/videos/:videoId", h.SearchHandler.GetVideoDetails)
+	search.Get("/places", middleware.OptionalAuth(), guestLimiter.GuestPlacesLimit(), h.SearchHandler.SearchPlaces)
+	search.Get("/places/:placeId", h.SearchHandler.GetPlaceDetails)
+	search.Get("/places/:placeId/enhanced", middleware.OptionalAuth(), h.SearchHandler.GetPlaceDetailsEnhanced)
+	search.Get("/nearby", middleware.OptionalAuth(), guestLimiter.GuestPlacesLimit(), h.SearchHandler.SearchNearbyPlaces)
+
+	// Protected search history endpoints (login required)
 	history := search.Group("/history")
 	history.Use(middleware.Protected())
 	history.Get("/", h.SearchHandler.GetSearchHistory)

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -16,29 +18,36 @@ import (
 	"gofiber-template/domain/services"
 	"gofiber-template/infrastructure/cache"
 	"gofiber-template/infrastructure/external/google"
+	"gofiber-template/infrastructure/external/openai"
 )
 
 type SearchServiceImpl struct {
-	searchHistoryRepo repositories.SearchHistoryRepository
-	googleSearch      *google.SearchClient
-	googlePlaces      *google.PlacesClient
-	googleYouTube     *google.YouTubeClient
-	redisClient       *redis.Client
+	searchHistoryRepo    repositories.SearchHistoryRepository
+	placeAIContentRepo   repositories.PlaceAIContentRepository
+	googleSearch         *google.SearchClient
+	googlePlaces         *google.PlacesClient
+	googleYouTube        *google.YouTubeClient
+	openaiClient         *openai.AIClient
+	redisClient          *redis.Client
 }
 
 func NewSearchService(
 	searchHistoryRepo repositories.SearchHistoryRepository,
+	placeAIContentRepo repositories.PlaceAIContentRepository,
 	googleSearch *google.SearchClient,
 	googlePlaces *google.PlacesClient,
 	googleYouTube *google.YouTubeClient,
+	openaiClient *openai.AIClient,
 	redisClient *redis.Client,
 ) services.SearchService {
 	return &SearchServiceImpl{
-		searchHistoryRepo: searchHistoryRepo,
-		googleSearch:      googleSearch,
-		googlePlaces:      googlePlaces,
-		googleYouTube:     googleYouTube,
-		redisClient:       redisClient,
+		searchHistoryRepo:  searchHistoryRepo,
+		placeAIContentRepo: placeAIContentRepo,
+		googleSearch:       googleSearch,
+		googlePlaces:       googlePlaces,
+		googleYouTube:      googleYouTube,
+		openaiClient:       openaiClient,
+		redisClient:        redisClient,
 	}
 }
 
@@ -203,8 +212,7 @@ func (s *SearchServiceImpl) SearchWebsites(ctx context.Context, userID uuid.UUID
 	if cached, err := s.redisClient.Get(ctx, cacheKey).Result(); err == nil {
 		var cachedResult dto.WebsiteSearchResponse
 		if json.Unmarshal([]byte(cached), &cachedResult) == nil {
-			// Save search history even for cached results
-			s.saveSearchHistory(ctx, userID, req.Query, models.SearchTypeWebsite, len(cachedResult.Results))
+			// Don't save history for cache hits - only first search counts
 			return &cachedResult, nil
 		}
 	}
@@ -257,7 +265,7 @@ func (s *SearchServiceImpl) SearchImages(ctx context.Context, userID uuid.UUID, 
 	if cached, err := s.redisClient.Get(ctx, cacheKey).Result(); err == nil {
 		var cachedResult dto.ImageSearchResponse
 		if json.Unmarshal([]byte(cached), &cachedResult) == nil {
-			s.saveSearchHistory(ctx, userID, req.Query, models.SearchTypeImage, len(cachedResult.Results))
+			// Don't save history for cache hits - only first search counts
 			return &cachedResult, nil
 		}
 	}
@@ -326,7 +334,7 @@ func (s *SearchServiceImpl) SearchVideos(ctx context.Context, userID uuid.UUID, 
 	if cached, err := s.redisClient.Get(ctx, cacheKey).Result(); err == nil {
 		var cachedResult dto.VideoSearchResponse
 		if json.Unmarshal([]byte(cached), &cachedResult) == nil {
-			s.saveSearchHistory(ctx, userID, req.Query, models.SearchTypeVideo, len(cachedResult.Results))
+			// Don't save history for cache hits - only first search counts
 			return &cachedResult, nil
 		}
 	}
@@ -495,7 +503,7 @@ func (s *SearchServiceImpl) SearchPlaces(ctx context.Context, userID uuid.UUID, 
 	if cached, err := s.redisClient.Get(ctx, cacheKey).Result(); err == nil {
 		var cachedResult dto.PlaceSearchResponse
 		if json.Unmarshal([]byte(cached), &cachedResult) == nil {
-			s.saveSearchHistory(ctx, userID, req.Query, models.SearchTypeMap, len(cachedResult.Results))
+			// Don't save history for cache hits - only first search counts
 			return &cachedResult, nil
 		}
 	}
@@ -841,4 +849,419 @@ func formatDistance(meters float64) string {
 		return fmt.Sprintf("%.0f m", meters)
 	}
 	return fmt.Sprintf("%.1f km", meters/1000)
+}
+
+// In-memory map to track generating places (simple approach)
+var generatingPlaces = make(map[string]bool)
+var generatingMutex = &sync.Mutex{}
+
+// GetPlaceDetailsEnhanced returns place details with AI-generated content
+// Returns immediately - AI content generates in background if not cached
+func (s *SearchServiceImpl) GetPlaceDetailsEnhanced(ctx context.Context, placeID string, userLat, userLng float64, includeAI bool) (*dto.PlaceDetailEnhancedResponse, error) {
+	// 1. Get basic place details first
+	basicDetails, err := s.GetPlaceDetails(ctx, placeID, userLat, userLng)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build enhanced response from basic details
+	response := &dto.PlaceDetailEnhancedResponse{
+		PlaceID:          basicDetails.PlaceID,
+		Name:             basicDetails.Name,
+		FormattedAddress: basicDetails.FormattedAddress,
+		Lat:              basicDetails.Lat,
+		Lng:              basicDetails.Lng,
+		Rating:           basicDetails.Rating,
+		ReviewCount:      basicDetails.ReviewCount,
+		PriceLevel:       basicDetails.PriceLevel,
+		Types:            basicDetails.Types,
+		Phone:            basicDetails.Phone,
+		Website:          basicDetails.Website,
+		GoogleMapsURL:    basicDetails.GoogleMapsURL,
+		OpeningHours:     basicDetails.OpeningHours,
+		Reviews:          basicDetails.Reviews,
+		Photos:           basicDetails.Photos,
+		Distance:         basicDetails.Distance,
+		DistanceText:     basicDetails.DistanceText,
+		AIStatus:         "unavailable",
+	}
+
+	// If AI content not requested, return basic response
+	if !includeAI {
+		return response, nil
+	}
+
+	// 2. Check if AI content exists in database
+	aiContent, err := s.placeAIContentRepo.GetByPlaceID(ctx, placeID)
+	if err == nil && aiContent != nil {
+		// Found in database - use cached content
+		response.AIStatus = "ready"
+		response.AIOverview = s.mapAIContentToOverview(aiContent)
+		response.GuideInfo = s.mapAIContentToGuideInfo(aiContent)
+		response.RelatedVideos = s.mapAIContentToVideos(aiContent)
+		return response, nil
+	}
+
+	// 3. Check if already generating
+	generatingMutex.Lock()
+	isGenerating := generatingPlaces[placeID]
+	if !isGenerating {
+		// Mark as generating
+		generatingPlaces[placeID] = true
+	}
+	generatingMutex.Unlock()
+
+	if isGenerating {
+		// Already generating - return with generating status
+		response.AIStatus = "generating"
+		return response, nil
+	}
+
+	// 4. Start background generation
+	response.AIStatus = "generating"
+	go s.generateAIContentBackground(placeID, basicDetails)
+
+	return response, nil
+}
+
+// generateAIContentBackground generates AI content in background
+func (s *SearchServiceImpl) generateAIContentBackground(placeID string, basicDetails *dto.PlaceDetailResponse) {
+	// Create a new context for background operation
+	ctx := context.Background()
+
+	defer func() {
+		// Remove from generating map when done
+		generatingMutex.Lock()
+		delete(generatingPlaces, placeID)
+		generatingMutex.Unlock()
+	}()
+
+	// Generate AI content
+	aiContent, err := s.generateAIContent(ctx, basicDetails)
+	if err != nil {
+		fmt.Printf("Background: Failed to generate AI content for place %s: %v\n", placeID, err)
+		return
+	}
+
+	// Save to database
+	if err := s.placeAIContentRepo.Upsert(ctx, aiContent); err != nil {
+		fmt.Printf("Background: Failed to save AI content for place %s: %v\n", placeID, err)
+		return
+	}
+
+	fmt.Printf("Background: Successfully generated AI content for place %s\n", placeID)
+}
+
+// generateAIContent generates AI content for a place
+func (s *SearchServiceImpl) generateAIContent(ctx context.Context, place *dto.PlaceDetailResponse) (*models.PlaceAIContent, error) {
+	// Generate AI overview using OpenAI
+	aiOverview, err := s.generateAIOverview(ctx, place)
+	if err != nil {
+		return nil, fmt.Errorf("generate AI overview: %w", err)
+	}
+
+	// Generate guide info using OpenAI
+	guideInfo, err := s.generateGuideInfo(ctx, place)
+	if err != nil {
+		// Don't fail, just skip guide info
+		fmt.Printf("Failed to generate guide info: %v\n", err)
+	}
+
+	// Get related videos from YouTube
+	videos, err := s.getRelatedVideos(ctx, place.Name)
+	if err != nil {
+		// Don't fail, just skip videos
+		fmt.Printf("Failed to get related videos: %v\n", err)
+	}
+
+	// Marshal JSON fields
+	highlightsJSON, _ := json.Marshal(aiOverview.Highlights)
+	tipsJSON, _ := json.Marshal(aiOverview.Tips)
+	quickFactsJSON, _ := json.Marshal(guideInfo.QuickFacts)
+	talkingPointsJSON, _ := json.Marshal(guideInfo.TalkingPoints)
+	commonQuestionsJSON, _ := json.Marshal(guideInfo.CommonQuestions)
+	videosJSON, _ := json.Marshal(videos)
+
+	// Create content record
+	content := &models.PlaceAIContent{
+		PlaceID:         place.PlaceID,
+		PlaceName:       place.Name,
+		Summary:         aiOverview.Summary,
+		History:         aiOverview.History,
+		Highlights:      highlightsJSON,
+		BestTimeToVisit: aiOverview.BestTimeToVisit,
+		Tips:            tipsJSON,
+		QuickFacts:      quickFactsJSON,
+		TalkingPoints:   talkingPointsJSON,
+		CommonQuestions: commonQuestionsJSON,
+		RelatedVideos:   videosJSON,
+		Language:        "th",
+		GeneratedAt:     time.Now(),
+		ExpiresAt:       time.Now().AddDate(0, 1, 0), // 1 month expiry
+	}
+
+	return content, nil
+}
+
+// generateAIOverview generates AI overview using OpenAI
+func (s *SearchServiceImpl) generateAIOverview(ctx context.Context, place *dto.PlaceDetailResponse) (*dto.AIPlaceOverview, error) {
+	prompt := fmt.Sprintf(`คุณเป็นมัคคุเทศก์ผู้เชี่ยวชาญด้านการท่องเที่ยวไทย กรุณาสร้างข้อมูลที่ละเอียดและมีประโยชน์เกี่ยวกับสถานที่นี้:
+
+📍 ชื่อสถานที่: %s
+📍 ที่ตั้ง: %s
+📍 ประเภท: %v
+⭐ คะแนน: %.1f (%d รีวิว)
+🌐 พิกัด: %.6f, %.6f
+
+กรุณาสร้างข้อมูลในรูปแบบ JSON ดังนี้:
+{
+    "summary": "ภาพรวมของสถานที่ที่ครอบคลุมและน่าสนใจ อธิบายว่าสถานที่นี้คืออะไร มีความสำคัญอย่างไร ทำไมนักท่องเที่ยวควรมาเยี่ยมชม (5-7 ประโยค ประมาณ 150-200 คำ)",
+    "history": "ประวัติความเป็นมาที่ละเอียด รวมถึงปีที่ก่อตั้ง/สร้าง ผู้ก่อตั้ง เหตุการณ์สำคัญ และวิวัฒนาการตลอดประวัติศาสตร์ (2-3 ย่อหน้า ประมาณ 200-300 คำ)",
+    "highlights": [
+        "จุดเด่นที่ 1 - อธิบายสั้นๆ ว่าทำไมถึงพิเศษ",
+        "จุดเด่นที่ 2 - สิ่งที่น่าสนใจเฉพาะของสถานที่นี้",
+        "จุดเด่นที่ 3 - กิจกรรมหรือประสบการณ์ที่ห้ามพลาด",
+        "จุดเด่นที่ 4 - สถาปัตยกรรม/ศิลปะ/ธรรมชาติที่โดดเด่น",
+        "จุดเด่นที่ 5 - สิ่งที่ทำให้แตกต่างจากที่อื่น"
+    ],
+    "bestTimeToVisit": "เวลาที่เหมาะสมในการเยี่ยมชม รวมถึงฤดูกาล ช่วงเวลาของวัน และเหตุผล (2-3 ประโยค)",
+    "tips": [
+        "เคล็ดลับที่ 1 - การเตรียมตัวก่อนมา",
+        "เคล็ดลับที่ 2 - สิ่งที่ควรรู้เกี่ยวกับการแต่งกาย/มารยาท",
+        "เคล็ดลับที่ 3 - จุดถ่ายรูปที่ดีที่สุด",
+        "เคล็ดลับที่ 4 - ร้านอาหาร/ที่พักใกล้เคียง",
+        "เคล็ดลับที่ 5 - การเดินทางและที่จอดรถ",
+        "เคล็ดลับที่ 6 - ค่าใช้จ่ายและเวลาที่ควรใช้"
+    ]
+}
+
+⚠️ กฎสำคัญ:
+- ตอบเป็นภาษาไทยเท่านั้น
+- ข้อมูลต้องถูกต้องตามความเป็นจริง ถ้าไม่แน่ใจให้ระบุว่า "ควรตรวจสอบข้อมูลเพิ่มเติม"
+- เนื้อหาต้องละเอียดและเป็นประโยชน์สำหรับมัคคุเทศก์
+- ตอบเฉพาะ JSON เท่านั้น ไม่ต้องมีข้อความอื่น`, place.Name, place.FormattedAddress, place.Types, place.Rating, place.ReviewCount, place.Lat, place.Lng)
+
+	messages := []openai.ChatMessage{
+		{Role: "system", Content: "คุณเป็นมัคคุเทศก์ผู้เชี่ยวชาญด้านการท่องเที่ยวไทยที่มีประสบการณ์มากกว่า 20 ปี คุณมีความรู้ลึกซึ้งเกี่ยวกับประวัติศาสตร์ วัฒนธรรม และสถานที่ท่องเที่ยวทั่วประเทศไทย ให้ข้อมูลที่ถูกต้อง ละเอียด และเป็นประโยชน์สำหรับการนำเที่ยว"},
+		{Role: "user", Content: prompt},
+	}
+
+	response, err := s.openaiClient.Chat(ctx, messages, 3000, 0.7)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(response.Choices) == 0 {
+		return nil, errors.New("no response from OpenAI")
+	}
+
+	// Parse JSON response
+	var overview dto.AIPlaceOverview
+	content := response.Choices[0].Message.Content
+	if err := json.Unmarshal([]byte(content), &overview); err != nil {
+		// Try to extract JSON from response
+		if start := findJSONStart(content); start >= 0 {
+			if end := findJSONEnd(content, start); end > start {
+				if err := json.Unmarshal([]byte(content[start:end+1]), &overview); err != nil {
+					return nil, fmt.Errorf("parse AI response: %w", err)
+				}
+			}
+		} else {
+			return nil, fmt.Errorf("parse AI response: %w", err)
+		}
+	}
+
+	overview.GeneratedAt = time.Now().Format(time.RFC3339)
+	return &overview, nil
+}
+
+// generateGuideInfo generates guide info using OpenAI
+func (s *SearchServiceImpl) generateGuideInfo(ctx context.Context, place *dto.PlaceDetailResponse) (*dto.PlaceGuideInfo, error) {
+	prompt := fmt.Sprintf(`คุณเป็นมัคคุเทศก์มืออาชีพ กรุณาสร้างข้อมูลที่เป็นประโยชน์สำหรับการนำเที่ยวที่:
+
+📍 สถานที่: %s
+📍 ที่ตั้ง: %s
+📍 ประเภท: %v
+
+กรุณาสร้างข้อมูลในรูปแบบ JSON:
+{
+    "quickFacts": [
+        "ข้อเท็จจริงที่ 1 - ข้อมูลตัวเลขหรือสถิติที่น่าสนใจ (เช่น พื้นที่ ปีที่สร้าง จำนวนผู้เข้าชม)",
+        "ข้อเท็จจริงที่ 2 - ความพิเศษหรือสถิติที่โดดเด่น (เช่น ใหญ่ที่สุด เก่าที่สุด แห่งแรก)",
+        "ข้อเท็จจริงที่ 3 - ข้อมูลที่นักท่องเที่ยวมักไม่รู้",
+        "ข้อเท็จจริงที่ 4 - ความเชื่อมโยงกับประวัติศาสตร์หรือบุคคลสำคัญ",
+        "ข้อเท็จจริงที่ 5 - ข้อมูลที่ทำให้สถานที่นี้มีเอกลักษณ์"
+    ],
+    "talkingPoints": [
+        "ประเด็นที่ 1 - เรื่องราวที่น่าสนใจสำหรับเล่าให้นักท่องเที่ยวฟัง (2-3 ประโยค)",
+        "ประเด็นที่ 2 - ตำนานหรือเรื่องเล่าที่เกี่ยวข้อง",
+        "ประเด็นที่ 3 - ความสำคัญทางวัฒนธรรม/ศาสนา/ประวัติศาสตร์",
+        "ประเด็นที่ 4 - เหตุการณ์พิเศษหรือเทศกาลที่จัดขึ้น",
+        "ประเด็นที่ 5 - การเปรียบเทียบกับสถานที่อื่นที่คล้ายกัน"
+    ],
+    "commonQuestions": [
+        {"question": "คำถามที่ 1 - คำถามเกี่ยวกับประวัติ/ที่มา", "answer": "คำตอบที่ละเอียดและถูกต้อง (3-4 ประโยค)"},
+        {"question": "คำถามที่ 2 - คำถามเกี่ยวกับการเข้าชม/ค่าใช้จ่าย", "answer": "คำตอบที่ละเอียดพร้อมข้อมูลที่เป็นประโยชน์"},
+        {"question": "คำถามที่ 3 - คำถามเกี่ยวกับสิ่งที่น่าสนใจ", "answer": "คำตอบที่ช่วยให้นักท่องเที่ยวได้รับประสบการณ์ที่ดี"},
+        {"question": "คำถามที่ 4 - คำถามเกี่ยวกับข้อห้ามหรือมารยาท", "answer": "คำตอบที่ช่วยให้ปฏิบัติตัวได้ถูกต้อง"},
+        {"question": "คำถามที่ 5 - คำถามอื่นที่นักท่องเที่ยวมักถาม", "answer": "คำตอบที่ครบถ้วนและเป็นประโยชน์"}
+    ]
+}
+
+⚠️ กฎสำคัญ:
+- ตอบเป็นภาษาไทยเท่านั้น
+- ข้อมูลต้องถูกต้องและเป็นประโยชน์สำหรับมัคคุเทศก์จริงๆ
+- คำตอบใน commonQuestions ต้องละเอียดพอที่จะตอบนักท่องเที่ยวได้
+- ตอบเฉพาะ JSON เท่านั้น ไม่ต้องมีข้อความอื่น`, place.Name, place.FormattedAddress, place.Types)
+
+	messages := []openai.ChatMessage{
+		{Role: "system", Content: "คุณเป็นมัคคุเทศก์ผู้เชี่ยวชาญที่มีประสบการณ์นำเที่ยวมากกว่า 20 ปี คุณรู้วิธีเล่าเรื่องให้น่าสนใจและรู้คำถามที่นักท่องเที่ยวมักถาม ให้ข้อมูลที่ละเอียดและเป็นประโยชน์จริง"},
+		{Role: "user", Content: prompt},
+	}
+
+	response, err := s.openaiClient.Chat(ctx, messages, 2500, 0.7)
+	if err != nil {
+		return &dto.PlaceGuideInfo{}, err
+	}
+
+	if len(response.Choices) == 0 {
+		return &dto.PlaceGuideInfo{}, errors.New("no response from OpenAI")
+	}
+
+	var guideInfo dto.PlaceGuideInfo
+	content := response.Choices[0].Message.Content
+	if err := json.Unmarshal([]byte(content), &guideInfo); err != nil {
+		if start := findJSONStart(content); start >= 0 {
+			if end := findJSONEnd(content, start); end > start {
+				if err := json.Unmarshal([]byte(content[start:end+1]), &guideInfo); err != nil {
+					return &dto.PlaceGuideInfo{}, nil
+				}
+			}
+		}
+	}
+
+	return &guideInfo, nil
+}
+
+// getRelatedVideos gets related YouTube videos
+func (s *SearchServiceImpl) getRelatedVideos(ctx context.Context, placeName string) ([]dto.RelatedVideo, error) {
+	searchReq := &google.VideoSearchRequest{
+		Query:      placeName + " ท่องเที่ยว",
+		MaxResults: 5,
+		Order:      "relevance",
+	}
+
+	searchResponse, err := s.googleYouTube.SearchVideos(ctx, searchReq)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get video IDs for details
+	var videoIDs []string
+	for _, item := range searchResponse.Items {
+		videoIDs = append(videoIDs, item.ID.VideoID)
+	}
+
+	// Get video details
+	var detailsMap = make(map[string]google.VideoDetails)
+	if len(videoIDs) > 0 {
+		detailsResponse, err := s.googleYouTube.GetVideoDetails(ctx, videoIDs)
+		if err == nil && detailsResponse != nil {
+			for _, d := range detailsResponse.Items {
+				detailsMap[d.ID] = d
+			}
+		}
+	}
+
+	var videos []dto.RelatedVideo
+	for _, item := range searchResponse.Items {
+		videoID := item.ID.VideoID
+		duration := ""
+		var viewCount int64
+		if details, ok := detailsMap[videoID]; ok {
+			duration = google.ParseDuration(details.ContentDetails.Duration)
+			viewCount, _ = strconv.ParseInt(details.Statistics.ViewCount, 10, 64)
+		}
+
+		thumbnailURL := item.Snippet.Thumbnails.High.URL
+		if thumbnailURL == "" {
+			thumbnailURL = item.Snippet.Thumbnails.Default.URL
+		}
+
+		videos = append(videos, dto.RelatedVideo{
+			VideoID:      videoID,
+			Title:        item.Snippet.Title,
+			ThumbnailURL: thumbnailURL,
+			ChannelTitle: item.Snippet.ChannelTitle,
+			Duration:     duration,
+			ViewCount:    viewCount,
+		})
+	}
+
+	return videos, nil
+}
+
+// Helper functions for mapping database content to DTOs
+func (s *SearchServiceImpl) mapAIContentToOverview(content *models.PlaceAIContent) *dto.AIPlaceOverview {
+	var highlights []string
+	var tips []string
+	_ = json.Unmarshal(content.Highlights, &highlights)
+	_ = json.Unmarshal(content.Tips, &tips)
+
+	return &dto.AIPlaceOverview{
+		Summary:         content.Summary,
+		History:         content.History,
+		Highlights:      highlights,
+		BestTimeToVisit: content.BestTimeToVisit,
+		Tips:            tips,
+		GeneratedAt:     content.GeneratedAt.Format(time.RFC3339),
+	}
+}
+
+func (s *SearchServiceImpl) mapAIContentToGuideInfo(content *models.PlaceAIContent) *dto.PlaceGuideInfo {
+	var quickFacts []string
+	var talkingPoints []string
+	var commonQuestions []dto.PlaceFAQ
+	_ = json.Unmarshal(content.QuickFacts, &quickFacts)
+	_ = json.Unmarshal(content.TalkingPoints, &talkingPoints)
+	_ = json.Unmarshal(content.CommonQuestions, &commonQuestions)
+
+	return &dto.PlaceGuideInfo{
+		QuickFacts:      quickFacts,
+		TalkingPoints:   talkingPoints,
+		CommonQuestions: commonQuestions,
+	}
+}
+
+func (s *SearchServiceImpl) mapAIContentToVideos(content *models.PlaceAIContent) []dto.RelatedVideo {
+	var videos []dto.RelatedVideo
+	_ = json.Unmarshal(content.RelatedVideos, &videos)
+	return videos
+}
+
+// Helper to find JSON start in string
+func findJSONStart(s string) int {
+	for i, c := range s {
+		if c == '{' {
+			return i
+		}
+	}
+	return -1
+}
+
+// Helper to find JSON end in string
+func findJSONEnd(s string, start int) int {
+	depth := 0
+	for i := start; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }

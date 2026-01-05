@@ -332,3 +332,56 @@ func (h *FolderHandler) CheckItemInFolders(c *fiber.Ctx) error {
 
 	return utils.SuccessResponse(c, "Item check completed", result)
 }
+
+func (h *FolderHandler) BatchCheckItemsInFolders(c *fiber.Ctx) error {
+	user, err := utils.GetUserFromContext(c)
+	if err != nil {
+		return utils.UnauthorizedResponse(c, "User not authenticated")
+	}
+
+	var req dto.BatchCheckItemsRequest
+	if err := c.BodyParser(&req); err != nil {
+		return utils.ValidationErrorResponse(c, "Invalid request body")
+	}
+
+	if err := utils.ValidateStruct(&req); err != nil {
+		errors := utils.GetValidationErrors(err)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"message": "Validation failed",
+			"errors":  errors,
+		})
+	}
+
+	result, err := h.folderService.BatchCheckItemsInFolders(c.Context(), user.ID, req.URLs)
+	if err != nil {
+		return utils.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to batch check items", err)
+	}
+
+	return utils.SuccessResponse(c, "Batch item check completed", result)
+}
+
+func (h *FolderHandler) UploadItemToFolder(c *fiber.Ctx) error {
+	user, err := utils.GetUserFromContext(c)
+	if err != nil {
+		return utils.UnauthorizedResponse(c, "User not authenticated")
+	}
+
+	folderIDStr := c.Params("id")
+	folderID, err := uuid.Parse(folderIDStr)
+	if err != nil {
+		return utils.ValidationErrorResponse(c, "Invalid folder ID")
+	}
+
+	file, err := c.FormFile("file")
+	if err != nil {
+		return utils.ValidationErrorResponse(c, "No file uploaded")
+	}
+
+	result, err := h.folderService.UploadItemToFolder(c.Context(), user.ID, folderID, file)
+	if err != nil {
+		return utils.ErrorResponse(c, fiber.StatusBadRequest, err.Error(), err)
+	}
+
+	return utils.SuccessResponse(c, "File uploaded successfully", result)
+}

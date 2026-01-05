@@ -200,3 +200,32 @@ func (r *FolderItemRepositoryImpl) GetFolderIDsByURL(ctx context.Context, userID
 		Pluck("folder_id", &folderIDs).Error
 	return folderIDs, err
 }
+
+func (r *FolderItemRepositoryImpl) GetFolderIDsByURLs(ctx context.Context, userID uuid.UUID, urls []string) (map[string][]uuid.UUID, error) {
+	type urlFolderPair struct {
+		URL      string
+		FolderID uuid.UUID
+	}
+
+	var pairs []urlFolderPair
+	err := r.db.WithContext(ctx).
+		Model(&models.FolderItem{}).
+		Select("folder_items.url, folder_items.folder_id").
+		Joins("INNER JOIN folders ON folders.id = folder_items.folder_id").
+		Where("folders.user_id = ? AND folder_items.url IN ?", userID, urls).
+		Find(&pairs).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Group by URL
+	result := make(map[string][]uuid.UUID)
+	for _, url := range urls {
+		result[url] = []uuid.UUID{}
+	}
+	for _, pair := range pairs {
+		result[pair.URL] = append(result[pair.URL], pair.FolderID)
+	}
+
+	return result, nil
+}

@@ -105,6 +105,34 @@ func (h *FavoriteHandler) CheckFavorite(c *fiber.Ctx) error {
 	return utils.SuccessResponse(c, "Favorite status retrieved", result)
 }
 
+func (h *FavoriteHandler) BatchCheckFavorites(c *fiber.Ctx) error {
+	user, err := utils.GetUserFromContext(c)
+	if err != nil {
+		return utils.UnauthorizedResponse(c, "User not authenticated")
+	}
+
+	var req dto.BatchCheckFavoritesRequest
+	if err := c.BodyParser(&req); err != nil {
+		return utils.ValidationErrorResponse(c, "Invalid request body")
+	}
+
+	if err := utils.ValidateStruct(&req); err != nil {
+		errors := utils.GetValidationErrors(err)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"message": "Validation failed",
+			"errors":  errors,
+		})
+	}
+
+	result, err := h.favoriteService.BatchCheckFavorites(c.Context(), user.ID, req.ExternalIDs)
+	if err != nil {
+		return utils.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to batch check favorites", err)
+	}
+
+	return utils.SuccessResponse(c, "Batch favorite check completed", result)
+}
+
 func (h *FavoriteHandler) ToggleFavorite(c *fiber.Ctx) error {
 	user, err := utils.GetUserFromContext(c)
 	if err != nil {

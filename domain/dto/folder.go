@@ -135,3 +135,22 @@ type FolderSummaryResponse struct {
 	ID   uuid.UUID `json:"id"`
 	Name string    `json:"name"`
 }
+
+// ==================== Batch Check Item DTOs ====================
+
+type BatchCheckItemsRequest struct {
+	URLs []string `json:"urls" validate:"required,min=1,max=50,dive,url"`
+}
+
+type BatchCheckItemsResponse struct {
+	Items map[string]CheckItemInFoldersResponse `json:"items"`
+}
+
+// ==================== Upload Item DTOs ====================
+
+type UploadItemResponse struct {
+	Item     FolderItemResponse `json:"item"`
+	FileURL  string             `json:"fileUrl"`
+	FileSize int64              `json:"fileSize"`
+	MimeType string             `json:"mimeType"`
+}

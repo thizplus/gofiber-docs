@@ -112,3 +112,11 @@ func (r *FavoriteRepositoryImpl) GetByUserIDAndExternalID(ctx context.Context, u
 	}
 	return &favorite, nil
 }
+
+func (r *FavoriteRepositoryImpl) GetByUserIDAndExternalIDs(ctx context.Context, userID uuid.UUID, externalIDs []string) ([]*models.Favorite, error) {
+	var favorites []*models.Favorite
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND external_id IN ?", userID, externalIDs).
+		Find(&favorites).Error
+	return favorites, err
+}

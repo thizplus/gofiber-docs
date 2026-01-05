@@ -16,6 +16,7 @@ type FavoriteService interface {
 
 	// Check favorite status
 	CheckFavorite(ctx context.Context, userID uuid.UUID, req *dto.CheckFavoriteRequest) (*dto.CheckFavoriteResponse, error)
+	BatchCheckFavorites(ctx context.Context, userID uuid.UUID, externalIDs []string) (*dto.BatchCheckFavoritesResponse, error)
 
 	// Toggle favorite (add if not exists, remove if exists)
 	ToggleFavorite(ctx context.Context, userID uuid.UUID, req *dto.AddFavoriteRequest) (*dto.CheckFavoriteResponse, error)

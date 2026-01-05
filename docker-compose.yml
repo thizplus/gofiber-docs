@@ -35,22 +35,31 @@ services:
       - REDIS_DB=0
       # JWT
       - JWT_SECRET=${JWT_SECRET}
-      # Bunny Storage
-      - BUNNY_STORAGE_ZONE=${BUNNY_STORAGE_ZONE}
-      - BUNNY_ACCESS_KEY=${BUNNY_ACCESS_KEY}
-      - BUNNY_BASE_URL=${BUNNY_BASE_URL}
-      - BUNNY_CDN_URL=${BUNNY_CDN_URL}
+      # Cloudflare R2 Storage
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+      - R2_BUCKET=${R2_BUCKET}
+      - R2_PUBLIC_URL=${R2_PUBLIC_URL}
       # Google APIs
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - GOOGLE_SEARCH_ENGINE_ID=${GOOGLE_SEARCH_ENGINE_ID}
       - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
+      # Google OAuth
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URL=${GOOGLE_REDIRECT_URL:-http://localhost:8080/api/v1/auth/google/callback}
+      # LINE OAuth
+      - LINE_CHANNEL_ID=${LINE_CHANNEL_ID}
+      - LINE_CHANNEL_SECRET=${LINE_CHANNEL_SECRET}
+      - LINE_REDIRECT_URL=${LINE_REDIRECT_URL:-http://localhost:8080/api/v1/auth/line/callback}
       # OpenAI
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
       # Rate Limiting
-      - RATE_LIMIT_SEARCH=100
-      - RATE_LIMIT_AI=50
-      - RATE_LIMIT_GENERAL=200
+      - RATE_LIMIT_SEARCH=${RATE_LIMIT_SEARCH:-100}
+      - RATE_LIMIT_AI=${RATE_LIMIT_AI:-50}
+      - RATE_LIMIT_GENERAL=${RATE_LIMIT_GENERAL:-200}
     restart: unless-stopped
     networks:
       - stou-network
@@ -64,14 +73,26 @@ services:
       dockerfile: Dockerfile
       args:
         - NEXT_PUBLIC_API_URL=http://api:8080/api/v1
+        - NEXT_PUBLIC_APP_NAME=${NEXT_PUBLIC_APP_NAME:-STOU Smart Tour}
+        - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3001}
+    image: stou-frontend:latest
     container_name: stou-frontend
     ports:
-      - "3000:3000"
+      - "3001:3001"
     depends_on:
       - api
     environment:
       - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
       - NEXT_PUBLIC_API_URL=http://localhost:8080/api/v1
+      - NEXT_PUBLIC_APP_NAME=${NEXT_PUBLIC_APP_NAME:-STOU Smart Tour}
+      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3001}
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     restart: unless-stopped
     networks:
       - stou-network

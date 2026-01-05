@@ -55,3 +55,13 @@ type CheckFavoriteResponse struct {
 	IsFavorite bool       `json:"isFavorite"`
 	FavoriteID *uuid.UUID `json:"favoriteId,omitempty"`
 }
+
+// ==================== Batch Check Favorite DTOs ====================
+
+type BatchCheckFavoritesRequest struct {
+	ExternalIDs []string `json:"externalIds" validate:"required,min=1,max=50"`
+}
+
+type BatchCheckFavoritesResponse struct {
+	Items map[string]CheckFavoriteResponse `json:"items"`
+}
