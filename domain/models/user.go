@@ -16,7 +16,7 @@ type User struct {
 	Avatar    string `gorm:"type:varchar(500)"` // Avatar URL from OAuth provider or R2
 
 	// STOU Specific
-	StudentID string `gorm:"type:varchar(11);uniqueIndex"` // รหัสนักศึกษา 11 หลัก
+	StudentID *string `gorm:"type:varchar(11);uniqueIndex"` // รหัสนักศึกษา 11 หลัก (NULL for OAuth users)
 
 	// Preferences
 	Language string `gorm:"type:varchar(5);default:'th'"`    // th, en

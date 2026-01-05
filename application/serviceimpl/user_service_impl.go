@@ -504,7 +504,7 @@ func (s *UserServiceImpl) UpdateProfileInfo(ctx context.Context, userID uuid.UUI
 		if existing != nil && existing.ID != userID {
 			return nil, errors.New("รหัสนักศึกษานี้ถูกใช้งานแล้ว")
 		}
-		user.StudentID = req.StudentID
+		user.StudentID = &req.StudentID
 	}
 	if req.Language != "" {
 		user.Language = req.Language

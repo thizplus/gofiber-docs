@@ -68,6 +68,13 @@ func UserToUserResponse(user *models.User) *UserResponse {
 	if user == nil {
 		return nil
 	}
+
+	// Handle nullable StudentID
+	studentID := ""
+	if user.StudentID != nil {
+		studentID = *user.StudentID
+	}
+
 	return &UserResponse{
 		ID:           user.ID,
 		Email:        user.Email,
@@ -75,7 +82,7 @@ func UserToUserResponse(user *models.User) *UserResponse {
 		FirstName:    user.FirstName,
 		LastName:     user.LastName,
 		Avatar:       user.Avatar,
-		StudentID:    user.StudentID,
+		StudentID:    studentID,
 		Language:     user.Language,
 		Theme:        user.Theme,
 		Role:         user.Role,
