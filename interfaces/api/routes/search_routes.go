@@ -20,7 +20,7 @@ func SetupSearchRoutes(api fiber.Router, h *handlers.Handlers) {
 	search.Get("/images", middleware.OptionalAuth(), guestLimiter.GuestMediaLimit(), h.SearchHandler.SearchImages)
 	search.Get("/videos", middleware.OptionalAuth(), guestLimiter.GuestMediaLimit(), h.SearchHandler.SearchVideos)
 	search.Get("/videos/:videoId", h.SearchHandler.GetVideoDetails)
-	search.Get("/places", middleware.OptionalAuth(), guestLimiter.GuestPlacesLimit(), h.SearchHandler.SearchPlaces)
+	search.Get("/places", middleware.OptionalAuth(), h.SearchHandler.SearchPlaces) // No rate limit - public
 	search.Get("/places/:placeId", h.SearchHandler.GetPlaceDetails)
 	search.Get("/places/:placeId/enhanced", middleware.OptionalAuth(), h.SearchHandler.GetPlaceDetailsEnhanced)
 	search.Get("/nearby", middleware.OptionalAuth(), guestLimiter.GuestPlacesLimit(), h.SearchHandler.SearchNearbyPlaces)
