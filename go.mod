@@ -17,14 +17,13 @@ require (
 	github.com/redis/go-redis/v9 v9.4.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	golang.org/x/crypto v0.18.0
-	golang.org/x/oauth2 v0.34.0
+	golang.org/x/oauth2 v0.21.0
 	gorm.io/datatypes v1.2.0
 	gorm.io/driver/postgres v1.5.4
 	gorm.io/gorm v1.25.6
 )
 
 require (
-	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	github.com/andybalholm/brotli v1.0.5 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.4 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.16 // indirect
