@@ -9,7 +9,7 @@ import (
 
 type CreateUserRequest struct {
 	Email     string `json:"email" validate:"required,email,max=255"`
-	Username  string `json:"username" validate:"required,min=3,max=20,alphanum"`
+	Username  string `json:"username" validate:"omitempty,min=3,max=20,alphanum"` // Optional: auto-generated from email if not provided
 	Password  string `json:"password" validate:"required,min=8,max=72"`
 	FirstName string `json:"firstName" validate:"required,min=1,max=50"`
 	LastName  string `json:"lastName" validate:"required,min=1,max=50"`

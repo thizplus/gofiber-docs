@@ -43,9 +43,16 @@ func (s *UserServiceImpl) Register(ctx context.Context, req *dto.CreateUserReque
 		return nil, errors.New("อีเมลนี้ถูกใช้งานแล้ว")
 	}
 
-	existingUser, _ = s.userRepo.GetByUsername(ctx, req.Username)
-	if existingUser != nil {
-		return nil, errors.New("ชื่อผู้ใช้นี้ถูกใช้งานแล้ว")
+	// Auto-generate username from email if not provided
+	username := req.Username
+	if username == "" {
+		username = s.generateUsernameFromEmail(ctx, req.Email)
+	} else {
+		// Check if provided username already exists
+		existingUser, _ = s.userRepo.GetByUsername(ctx, username)
+		if existingUser != nil {
+			return nil, errors.New("ชื่อผู้ใช้นี้ถูกใช้งานแล้ว")
+		}
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -54,16 +61,17 @@ func (s *UserServiceImpl) Register(ctx context.Context, req *dto.CreateUserReque
 	}
 
 	user := &models.User{
-		ID:        uuid.New(),
-		Email:     req.Email,
-		Username:  req.Username,
-		Password:  string(hashedPassword),
-		FirstName: req.FirstName,
-		LastName:  req.LastName,
-		Role:      "user",
-		IsActive:  true,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:           uuid.New(),
+		Email:        req.Email,
+		Username:     username,
+		Password:     string(hashedPassword),
+		FirstName:    req.FirstName,
+		LastName:     req.LastName,
+		Role:         "user",
+		IsActive:     true,
+		AuthProvider: "email",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 
 	err = s.userRepo.Create(ctx, user)
