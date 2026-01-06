@@ -38,19 +38,23 @@ type Container struct {
 	OpenAIClient          *openai.AIClient
 
 	// Repositories
-	UserRepository          repositories.UserRepository
-	TaskRepository          repositories.TaskRepository
-	FileRepository          repositories.FileRepository
-	JobRepository           repositories.JobRepository
-	FolderRepository        repositories.FolderRepository
-	FolderItemRepository    repositories.FolderItemRepository
-	FavoriteRepository      repositories.FavoriteRepository
-	SearchHistoryRepository repositories.SearchHistoryRepository
-	AIChatSessionRepository    repositories.AIChatSessionRepository
-	AIChatMessageRepository    repositories.AIChatMessageRepository
-	PlaceAIContentRepository   repositories.PlaceAIContentRepository
+	UserRepository           repositories.UserRepository
+	TaskRepository           repositories.TaskRepository
+	FileRepository           repositories.FileRepository
+	JobRepository            repositories.JobRepository
+	FolderRepository         repositories.FolderRepository
+	FolderItemRepository     repositories.FolderItemRepository
+	FavoriteRepository       repositories.FavoriteRepository
+	SearchHistoryRepository  repositories.SearchHistoryRepository
+	AIChatSessionRepository  repositories.AIChatSessionRepository
+	AIChatMessageRepository  repositories.AIChatMessageRepository
+	PlaceAIContentRepository repositories.PlaceAIContentRepository
+	APIRequestLogRepository  repositories.APIRequestLogRepository
 
 	// Services
+	APILoggerService *serviceimpl.APILoggerService
+
+	// Domain Services
 	UserService     services.UserService
 	TaskService     services.TaskService
 	FileService     services.FileService
@@ -204,12 +208,17 @@ func (c *Container) initRepositories() error {
 	c.AIChatSessionRepository = postgres.NewAIChatSessionRepository(c.DB)
 	c.AIChatMessageRepository = postgres.NewAIChatMessageRepository(c.DB)
 	c.PlaceAIContentRepository = postgres.NewPlaceAIContentRepository(c.DB)
+	c.APIRequestLogRepository = postgres.NewAPIRequestLogRepository(c.DB)
 
 	log.Println("✓ Repositories initialized")
 	return nil
 }
 
 func (c *Container) initServices() error {
+	// Initialize API Logger Service first (other services may use it)
+	c.APILoggerService = serviceimpl.NewAPILoggerService(c.APIRequestLogRepository)
+	log.Println("✓ API Logger Service initialized")
+
 	c.UserService = serviceimpl.NewUserService(c.UserRepository, c.Config.JWT.Secret, c.R2Storage, c.Config.R2.PublicURL)
 	c.TaskService = serviceimpl.NewTaskService(c.TaskRepository, c.UserRepository)
 	c.FileService = serviceimpl.NewFileService(c.FileRepository, c.UserRepository, c.R2Storage)
@@ -223,6 +232,7 @@ func (c *Container) initServices() error {
 		c.GoogleYouTubeClient,
 		c.OpenAIClient,
 		c.RedisClient.GetClient(),
+		c.APILoggerService,
 	)
 
 	c.AIService = serviceimpl.NewAIService(
@@ -302,6 +312,12 @@ func (c *Container) Cleanup() error {
 		}
 	}
 
+	// Flush API logger buffer before closing connections
+	if c.APILoggerService != nil {
+		c.APILoggerService.Flush(context.Background())
+		log.Println("✓ API logger flushed")
+	}
+
 	// Close Redis connection
 	if c.RedisClient != nil {
 		if err := c.RedisClient.Close(); err != nil {
@@ -347,4 +363,8 @@ func (c *Container) GetHandlerServices() *handlers.Services {
 		FavoriteService: c.FavoriteService,
 		UtilityService:  c.UtilityService,
 	}
+}
+
+func (c *Container) GetAPILoggerService() *serviceimpl.APILoggerService {
+	return c.APILoggerService
 }

@@ -41,6 +41,10 @@ func main() {
 	// Setup routes
 	routes.SetupRoutes(app, h)
 
+	// Setup admin routes for API statistics
+	api := app.Group("/api/v1")
+	routes.SetupAdminRoutes(api, container.GetAPILoggerService())
+
 	// Start server
 	port := container.GetConfig().App.Port
 	log.Printf("🚀 Server starting on port %s", port)

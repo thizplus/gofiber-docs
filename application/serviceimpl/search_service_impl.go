@@ -29,6 +29,7 @@ type SearchServiceImpl struct {
 	googleYouTube        *google.YouTubeClient
 	openaiClient         *openai.AIClient
 	redisClient          *redis.Client
+	apiLogger            *APILoggerService
 }
 
 func NewSearchService(
@@ -39,6 +40,7 @@ func NewSearchService(
 	googleYouTube *google.YouTubeClient,
 	openaiClient *openai.AIClient,
 	redisClient *redis.Client,
+	apiLogger *APILoggerService,
 ) services.SearchService {
 	return &SearchServiceImpl{
 		searchHistoryRepo:  searchHistoryRepo,
@@ -48,6 +50,7 @@ func NewSearchService(
 		googleYouTube:      googleYouTube,
 		openaiClient:       openaiClient,
 		redisClient:        redisClient,
+		apiLogger:          apiLogger,
 	}
 }
 
@@ -216,13 +219,34 @@ func (s *SearchServiceImpl) SearchWebsites(ctx context.Context, userID uuid.UUID
 	if cached, err := s.redisClient.Get(ctx, cacheKey).Result(); err == nil {
 		var cachedResult dto.WebsiteSearchResponse
 		if json.Unmarshal([]byte(cached), &cachedResult) == nil {
+			// Log cache hit
+			if s.apiLogger != nil {
+				s.apiLogger.LogCacheHit(ctx, "google_search", "website_search", cacheKey, &userID)
+			}
 			// Don't save history for cache hits - only first search counts
 			return &cachedResult, nil
 		}
 	}
 
 	// Cache miss - call API
+	startTime := time.Now()
 	searchResponse, err := s.googleSearch.SearchAll(ctx, expandedQuery, req.Page, req.PageSize)
+	durationMs := int(time.Since(startTime).Milliseconds())
+
+	// Log API call
+	if s.apiLogger != nil {
+		success := err == nil
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		}
+		s.apiLogger.LogAPICall(ctx, "google_search", "website_search", map[string]interface{}{
+			"query":    expandedQuery,
+			"page":     req.Page,
+			"pageSize": req.PageSize,
+		}, 0.005, durationMs, &userID, success, errMsg) // Google Custom Search: ~$5 per 1000 queries
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -273,13 +297,34 @@ func (s *SearchServiceImpl) SearchImages(ctx context.Context, userID uuid.UUID, 
 	if cached, err := s.redisClient.Get(ctx, cacheKey).Result(); err == nil {
 		var cachedResult dto.ImageSearchResponse
 		if json.Unmarshal([]byte(cached), &cachedResult) == nil {
+			// Log cache hit
+			if s.apiLogger != nil {
+				s.apiLogger.LogCacheHit(ctx, "google_search", "image_search", cacheKey, &userID)
+			}
 			// Don't save history for cache hits - only first search counts
 			return &cachedResult, nil
 		}
 	}
 
 	// Cache miss - call API
+	startTime := time.Now()
 	searchResponse, err := s.googleSearch.SearchImages(ctx, expandedQuery, req.Page, req.PageSize)
+	durationMs := int(time.Since(startTime).Milliseconds())
+
+	// Log API call
+	if s.apiLogger != nil {
+		success := err == nil
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		}
+		s.apiLogger.LogAPICall(ctx, "google_search", "image_search", map[string]interface{}{
+			"query":    expandedQuery,
+			"page":     req.Page,
+			"pageSize": req.PageSize,
+		}, 0.005, durationMs, &userID, success, errMsg) // Google Custom Search: ~$5 per 1000 queries
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -346,6 +391,10 @@ func (s *SearchServiceImpl) SearchVideos(ctx context.Context, userID uuid.UUID, 
 	if cached, err := s.redisClient.Get(ctx, cacheKey).Result(); err == nil {
 		var cachedResult dto.VideoSearchResponse
 		if json.Unmarshal([]byte(cached), &cachedResult) == nil {
+			// Log cache hit
+			if s.apiLogger != nil {
+				s.apiLogger.LogCacheHit(ctx, "youtube", "video_search", cacheKey, &userID)
+			}
 			// Don't save history for cache hits - only first search counts
 			return &cachedResult, nil
 		}
@@ -358,7 +407,24 @@ func (s *SearchServiceImpl) SearchVideos(ctx context.Context, userID uuid.UUID, 
 		Order:      req.Order,
 	}
 
+	startTime := time.Now()
 	searchResponse, err := s.googleYouTube.SearchVideos(ctx, searchReq)
+	durationMs := int(time.Since(startTime).Milliseconds())
+
+	// Log API call
+	if s.apiLogger != nil {
+		success := err == nil
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		}
+		s.apiLogger.LogAPICall(ctx, "youtube", "video_search", map[string]interface{}{
+			"query":      expandedQuery,
+			"maxResults": req.PageSize,
+			"order":      req.Order,
+		}, 0.0001, durationMs, &userID, success, errMsg) // YouTube Data API: 100 units = ~0.01 cents
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -525,6 +591,14 @@ func (s *SearchServiceImpl) SearchPlaces(ctx context.Context, userID uuid.UUID, 
 	if cached, err := s.redisClient.Get(ctx, cacheKey).Result(); err == nil {
 		var cachedResult dto.PlaceSearchResponse
 		if json.Unmarshal([]byte(cached), &cachedResult) == nil {
+			// Log cache hit
+			if s.apiLogger != nil {
+				endpoint := "text_search"
+				if !useTextSearch {
+					endpoint = "nearby_search"
+				}
+				s.apiLogger.LogCacheHit(ctx, "google_places", endpoint, cacheKey, &userID)
+			}
 			// Don't save history for cache hits - only first search counts
 			return &cachedResult, nil
 		}
@@ -533,6 +607,10 @@ func (s *SearchServiceImpl) SearchPlaces(ctx context.Context, userID uuid.UUID, 
 	// Cache miss - call API
 	var searchResponse *google.NearbySearchResponse
 	var err error
+	var endpoint string
+	var apiCost float64
+
+	startTime := time.Now()
 
 	if useTextSearch {
 		// Text Search - search by query text only (like Google Maps search)
@@ -542,6 +620,8 @@ func (s *SearchServiceImpl) SearchPlaces(ctx context.Context, userID uuid.UUID, 
 			Region:   "th",
 		}
 		searchResponse, err = s.googlePlaces.TextSearch(ctx, textReq)
+		endpoint = "text_search"
+		apiCost = 0.032 // Text Search: $32 per 1000 requests
 	} else {
 		// Nearby Search - search by location
 		nearbyReq := &google.NearbySearchRequest{
@@ -553,6 +633,27 @@ func (s *SearchServiceImpl) SearchPlaces(ctx context.Context, userID uuid.UUID, 
 			Language: lang,
 		}
 		searchResponse, err = s.googlePlaces.NearbySearch(ctx, nearbyReq)
+		endpoint = "nearby_search"
+		apiCost = 0.032 // Nearby Search: $32 per 1000 requests
+	}
+
+	durationMs := int(time.Since(startTime).Milliseconds())
+
+	// Log API call
+	if s.apiLogger != nil {
+		success := err == nil
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		}
+		s.apiLogger.LogAPICall(ctx, "google_places", endpoint, map[string]interface{}{
+			"query":    expandedQuery,
+			"lat":      req.Lat,
+			"lng":      req.Lng,
+			"radius":   req.Radius,
+			"type":     req.PlaceType,
+			"language": lang,
+		}, apiCost, durationMs, &userID, success, errMsg)
 	}
 
 	if err != nil {
@@ -631,6 +732,10 @@ func (s *SearchServiceImpl) GetPlaceDetails(ctx context.Context, placeID string,
 	if cached, err := s.redisClient.Get(ctx, cacheKey).Result(); err == nil {
 		var cachedResult dto.PlaceDetailResponse
 		if json.Unmarshal([]byte(cached), &cachedResult) == nil {
+			// Log cache hit
+			if s.apiLogger != nil {
+				s.apiLogger.LogCacheHit(ctx, "google_places", "place_details", cacheKey, nil)
+			}
 			// Calculate distance for this user
 			if userLat != 0 && userLng != 0 {
 				distance := google.CalculateDistance(userLat, userLng, cachedResult.Lat, cachedResult.Lng)
@@ -647,7 +752,25 @@ func (s *SearchServiceImpl) GetPlaceDetails(ctx context.Context, placeID string,
 		Language: lang,
 	}
 
+	startTime := time.Now()
 	detailsResponse, err := s.googlePlaces.GetPlaceDetails(ctx, detailsReq)
+	durationMs := int(time.Since(startTime).Milliseconds())
+
+	// Log API call - Place Details with Atmosphere fields is expensive!
+	// Basic: $17/1000, Contact: $20/1000, Atmosphere: $25/1000
+	// Total with reviews: ~$0.04 per request
+	if s.apiLogger != nil {
+		success := err == nil
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		}
+		s.apiLogger.LogAPICall(ctx, "google_places", "place_details", map[string]interface{}{
+			"placeID":  placeID,
+			"language": lang,
+		}, 0.04, durationMs, nil, success, errMsg)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -938,6 +1061,10 @@ func (s *SearchServiceImpl) GetPlaceDetailsEnhanced(ctx context.Context, placeID
 	// 2. Check if AI content exists in database for this language
 	aiContent, err := s.placeAIContentRepo.GetByPlaceIDAndLanguage(ctx, placeID, lang)
 	if err == nil && aiContent != nil {
+		// Log database hit - AI content served from database cache
+		if s.apiLogger != nil {
+			s.apiLogger.LogDatabaseHit(ctx, "openai", "place_ai_content", nil)
+		}
 		// Found in database - use cached content
 		response.AIStatus = "ready"
 		response.AIOverview = s.mapAIContentToOverview(aiContent)

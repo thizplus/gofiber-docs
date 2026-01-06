@@ -44,5 +44,6 @@ func Migrate(db *gorm.DB) error {
 		&models.AIChatSession{},
 		&models.AIChatMessage{},
 		&models.PlaceAIContent{},
+		&models.APIRequestLog{},
 	)
 }
