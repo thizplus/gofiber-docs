@@ -19,16 +19,16 @@ const (
 	PrefixUserSession  = "user:session"
 )
 
-// Cache TTLs
+// Cache TTLs - Optimized for tourism data (rarely changes)
 const (
-	TTLSearch       = 1 * time.Hour
-	TTLSearchAI     = 6 * time.Hour
-	TTLPlace        = 1 * time.Hour
-	TTLPlaceDetails = 24 * time.Hour
-	TTLNearbyPlaces = 1 * time.Hour
-	TTLYouTube      = 6 * time.Hour
-	TTLTranslate    = 7 * 24 * time.Hour
-	TTLUserSession  = 24 * time.Hour
+	TTLSearch       = 7 * 24 * time.Hour // 7 days - search results stable
+	TTLSearchAI     = 7 * 24 * time.Hour // 7 days - AI search results
+	TTLPlace        = 7 * 24 * time.Hour // 7 days - place info rarely changes
+	TTLPlaceDetails = 7 * 24 * time.Hour // 7 days - place details stable
+	TTLNearbyPlaces = 7 * 24 * time.Hour // 7 days - nearby places stable
+	TTLYouTube      = 7 * 24 * time.Hour // 7 days - video info stable
+	TTLTranslate    = 7 * 24 * time.Hour // 7 days - translations don't change
+	TTLUserSession  = 24 * time.Hour     // 24 hours - user sessions
 )
 
 // hashString creates MD5 hash of a string
