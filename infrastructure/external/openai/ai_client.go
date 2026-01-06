@@ -129,9 +129,21 @@ type SearchResultContext struct {
 	URL     string
 }
 
-// GenerateTravelSummary generates a travel summary from search results
-func (c *AIClient) GenerateTravelSummary(ctx context.Context, query string, searchResults []SearchResultContext) (*ChatResponse, error) {
-	systemPrompt := `คุณเป็นผู้ช่วยค้นหาข้อมูลท่องเที่ยวสำหรับนักศึกษามหาวิทยาลัยสุโขทัยธรรมาธิราช (มสธ.)
+// GetSystemPromptByLang returns system prompt based on language
+func GetSystemPromptByLang(lang string) string {
+	if lang == "en" {
+		return `You are a travel information assistant for students at Sukhothai Thammathirat Open University (STOU).
+Summarize information from the provided sources concisely, clearly, and usefully.
+
+Rules for responding:
+1. Respond in English
+2. Format as Markdown
+3. Summarize with main headings and bullet points
+4. Cite the source of information
+5. If there is price information, opening hours, or important details, include them
+6. Suggest 2-3 relevant follow-up questions`
+	}
+	return `คุณเป็นผู้ช่วยค้นหาข้อมูลท่องเที่ยวสำหรับนักศึกษามหาวิทยาลัยสุโขทัยธรรมาธิราช (มสธ.)
 ให้สรุปข้อมูลจาก sources ที่ได้รับอย่างกระชับ ชัดเจน และเป็นประโยชน์
 
 กฎในการตอบ:
@@ -141,14 +153,41 @@ func (c *AIClient) GenerateTravelSummary(ctx context.Context, query string, sear
 4. ระบุ source ที่มาของข้อมูล
 5. หากมีข้อมูลราคา เวลาเปิด-ปิด หรือข้อมูลสำคัญ ให้ระบุด้วย
 6. เสนอคำถาม follow-up ที่เกี่ยวข้อง 2-3 ข้อ`
+}
+
+// GetChatSystemPromptByLang returns chat system prompt based on language
+func GetChatSystemPromptByLang(lang string) string {
+	if lang == "en" {
+		return `You are a travel information assistant for STOU students.
+Answer travel-related questions in a friendly manner and provide useful information.
+Respond in English and use Markdown format.`
+	}
+	return `คุณเป็นผู้ช่วยค้นหาข้อมูลท่องเที่ยวสำหรับนักศึกษา มสธ.
+ตอบคำถามเกี่ยวกับการท่องเที่ยวอย่างเป็นมิตรและให้ข้อมูลที่เป็นประโยชน์
+ตอบเป็นภาษาไทยและใช้ Markdown format`
+}
+
+// GenerateTravelSummary generates a travel summary from search results
+func (c *AIClient) GenerateTravelSummary(ctx context.Context, query string, searchResults []SearchResultContext, lang string) (*ChatResponse, error) {
+	systemPrompt := GetSystemPromptByLang(lang)
 
 	// Build user prompt with search results
-	userPrompt := fmt.Sprintf("คำค้นหา: %s\n\nข้อมูลจากแหล่งต่างๆ:\n", query)
-	for i, result := range searchResults {
-		userPrompt += fmt.Sprintf("\n[Source %d: %s]\n%s\nURL: %s\n",
-			i+1, result.Title, result.Snippet, result.URL)
+	var userPrompt string
+	if lang == "en" {
+		userPrompt = fmt.Sprintf("Search query: %s\n\nInformation from various sources:\n", query)
+		for i, result := range searchResults {
+			userPrompt += fmt.Sprintf("\n[Source %d: %s]\n%s\nURL: %s\n",
+				i+1, result.Title, result.Snippet, result.URL)
+		}
+		userPrompt += "\nPlease summarize the above information systematically."
+	} else {
+		userPrompt = fmt.Sprintf("คำค้นหา: %s\n\nข้อมูลจากแหล่งต่างๆ:\n", query)
+		for i, result := range searchResults {
+			userPrompt += fmt.Sprintf("\n[Source %d: %s]\n%s\nURL: %s\n",
+				i+1, result.Title, result.Snippet, result.URL)
+		}
+		userPrompt += "\nกรุณาสรุปข้อมูลข้างต้นอย่างเป็นระบบ"
 	}
-	userPrompt += "\nกรุณาสรุปข้อมูลข้างต้นอย่างเป็นระบบ"
 
 	messages := []ChatMessage{
 		{Role: "system", Content: systemPrompt},
@@ -159,10 +198,8 @@ func (c *AIClient) GenerateTravelSummary(ctx context.Context, query string, sear
 }
 
 // ContinueChat continues an existing chat conversation
-func (c *AIClient) ContinueChat(ctx context.Context, history []ChatMessage, newMessage string) (*ChatResponse, error) {
-	systemPrompt := `คุณเป็นผู้ช่วยค้นหาข้อมูลท่องเที่ยวสำหรับนักศึกษา มสธ.
-ตอบคำถามเกี่ยวกับการท่องเที่ยวอย่างเป็นมิตรและให้ข้อมูลที่เป็นประโยชน์
-ตอบเป็นภาษาไทยและใช้ Markdown format`
+func (c *AIClient) ContinueChat(ctx context.Context, history []ChatMessage, newMessage string, lang string) (*ChatResponse, error) {
+	systemPrompt := GetChatSystemPromptByLang(lang)
 
 	messages := []ChatMessage{
 		{Role: "system", Content: systemPrompt},

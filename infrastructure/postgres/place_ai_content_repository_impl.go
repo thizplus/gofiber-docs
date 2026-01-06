@@ -55,7 +55,7 @@ func (r *PlaceAIContentRepositoryImpl) Update(ctx context.Context, content *mode
 func (r *PlaceAIContentRepositoryImpl) Upsert(ctx context.Context, content *models.PlaceAIContent) error {
 	return r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "place_id"}},
+			Columns:   []clause.Column{{Name: "place_id"}, {Name: "language"}},
 			UpdateAll: true,
 		}).
 		Create(content).Error

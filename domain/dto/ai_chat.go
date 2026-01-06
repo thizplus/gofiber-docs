@@ -10,6 +10,7 @@ import (
 
 type CreateAIChatRequest struct {
 	Query string `json:"query" validate:"required,min=1,max=500"`
+	Lang  string `json:"lang" validate:"omitempty,len=2"`
 }
 
 type AIChatSessionResponse struct {
@@ -44,6 +45,7 @@ type GetAIChatSessionsRequest struct {
 type SendAIChatMessageRequest struct {
 	SessionID uuid.UUID `json:"sessionId" param:"sessionId" validate:"required"`
 	Message   string    `json:"message" validate:"required,min=1,max=2000"`
+	Lang      string    `json:"lang" validate:"omitempty,len=2"`
 }
 
 type AIChatMessageResponse struct {

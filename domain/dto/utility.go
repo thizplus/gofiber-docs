@@ -66,6 +66,7 @@ type NearbyPlacesRequest struct {
 	Keyword   string  `json:"keyword" query:"keyword" validate:"omitempty,max=200"`
 	Page      int     `json:"page" query:"page" validate:"omitempty,min=1"`
 	PageSize  int     `json:"pageSize" query:"pageSize" validate:"omitempty,min=1,max=20"`
+	Lang      string  `json:"lang" query:"lang" validate:"omitempty,len=2"`
 }
 
 // ==================== Location DTOs ====================

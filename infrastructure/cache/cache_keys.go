@@ -53,19 +53,28 @@ func PlaceKey(placeID string) string {
 }
 
 // PlaceDetailsKey generates cache key for place details
-func PlaceDetailsKey(placeID string) string {
-	return fmt.Sprintf("%s:%s", PrefixPlaceDetails, placeID)
+func PlaceDetailsKey(placeID, lang string) string {
+	if lang == "" {
+		lang = "th"
+	}
+	return fmt.Sprintf("%s:%s:%s", PrefixPlaceDetails, placeID, lang)
 }
 
 // NearbyPlacesKey generates cache key for nearby places search
-func NearbyPlacesKey(lat, lng float64, radius int, placeType, keyword string) string {
-	key := fmt.Sprintf("%f:%f:%d:%s:%s", lat, lng, radius, placeType, keyword)
+func NearbyPlacesKey(lat, lng float64, radius int, placeType, keyword, lang string) string {
+	if lang == "" {
+		lang = "th"
+	}
+	key := fmt.Sprintf("%f:%f:%d:%s:%s:%s", lat, lng, radius, placeType, keyword, lang)
 	return fmt.Sprintf("%s:%s", PrefixNearbyPlaces, hashString(key))
 }
 
 // PlaceTextSearchKey generates cache key for text search places
-func PlaceTextSearchKey(query string) string {
-	return fmt.Sprintf("%s:text:%s", PrefixPlace, hashString(query))
+func PlaceTextSearchKey(query, lang string) string {
+	if lang == "" {
+		lang = "th"
+	}
+	return fmt.Sprintf("%s:text:%s:%s", PrefixPlace, hashString(query), lang)
 }
 
 // YouTubeKey generates cache key for YouTube search results

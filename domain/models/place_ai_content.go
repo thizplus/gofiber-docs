@@ -9,9 +9,10 @@ import (
 
 // PlaceAIContent stores AI-generated content for places
 // This prevents repeated API calls for the same place
+// Each place can have content in multiple languages
 type PlaceAIContent struct {
 	ID        uuid.UUID `gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
-	PlaceID   string    `gorm:"type:varchar(255);not null;uniqueIndex"` // Google Place ID
+	PlaceID   string    `gorm:"type:varchar(255);not null;uniqueIndex:idx_place_lang"` // Google Place ID
 	PlaceName string    `gorm:"type:varchar(500);not null"`
 
 	// AI Overview
@@ -30,7 +31,7 @@ type PlaceAIContent struct {
 	RelatedVideos datatypes.JSON `gorm:"type:jsonb;default:'[]'"` // []VideoInfo
 
 	// Metadata
-	Language    string    `gorm:"type:varchar(10);default:'th'"`
+	Language    string    `gorm:"type:varchar(10);default:'th';uniqueIndex:idx_place_lang"`
 	GeneratedAt time.Time `gorm:"not null"`
 	ExpiresAt   time.Time `gorm:"not null;index"` // For cleanup old records
 	CreatedAt   time.Time

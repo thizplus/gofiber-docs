@@ -89,8 +89,14 @@ func (s *AIServiceImpl) AISearch(ctx context.Context, userID uuid.UUID, req *dto
 		})
 	}
 
+	// Get language from request, default to Thai
+	lang := req.Language
+	if lang == "" {
+		lang = "th"
+	}
+
 	// Generate AI summary
-	aiResponse, err := s.aiClient.GenerateTravelSummary(ctx, req.Query, searchContext)
+	aiResponse, err := s.aiClient.GenerateTravelSummary(ctx, req.Query, searchContext, lang)
 	if err != nil {
 		return nil, err
 	}
@@ -127,6 +133,12 @@ func (s *AIServiceImpl) AISearch(ctx context.Context, userID uuid.UUID, req *dto
 }
 
 func (s *AIServiceImpl) CreateChatSession(ctx context.Context, userID uuid.UUID, req *dto.CreateAIChatRequest) (*dto.AIChatSessionDetailResponse, error) {
+	// Get language from request, default to Thai
+	lang := req.Lang
+	if lang == "" {
+		lang = "th"
+	}
+
 	// Create session
 	session := &models.AIChatSession{
 		UserID:       userID,
@@ -174,8 +186,8 @@ func (s *AIServiceImpl) CreateChatSession(ctx context.Context, userID uuid.UUID,
 		})
 	}
 
-	// Generate AI response
-	aiResponse, err := s.aiClient.GenerateTravelSummary(ctx, req.Query, searchContext)
+	// Generate AI response with language
+	aiResponse, err := s.aiClient.GenerateTravelSummary(ctx, req.Query, searchContext, lang)
 	if err != nil {
 		return nil, err
 	}
@@ -279,6 +291,12 @@ func (s *AIServiceImpl) ClearAllChatSessions(ctx context.Context, userID uuid.UU
 }
 
 func (s *AIServiceImpl) SendMessage(ctx context.Context, userID uuid.UUID, req *dto.SendAIChatMessageRequest) (*dto.AIChatMessageResponse, error) {
+	// Get language from request, default to Thai
+	lang := req.Lang
+	if lang == "" {
+		lang = "th"
+	}
+
 	session, err := s.sessionRepo.GetByID(ctx, req.SessionID)
 	if err != nil {
 		return nil, errors.New("session not found")
@@ -328,12 +346,16 @@ func (s *AIServiceImpl) SendMessage(ctx context.Context, userID uuid.UUID, req *
 			})
 			searchContext += "Title: " + r.Title + "\nContent: " + r.Snippet + "\n"
 		}
-		// Add search context to the message
-		req.Message += "\n\nข้อมูลอ้างอิงเพิ่มเติม:\n" + searchContext
+		// Add search context to the message (with language-appropriate label)
+		if lang == "en" {
+			req.Message += "\n\nAdditional reference information:\n" + searchContext
+		} else {
+			req.Message += "\n\nข้อมูลอ้างอิงเพิ่มเติม:\n" + searchContext
+		}
 	}
 
-	// Generate AI response
-	aiResponse, err := s.aiClient.ContinueChat(ctx, chatHistory, req.Message)
+	// Generate AI response with language
+	aiResponse, err := s.aiClient.ContinueChat(ctx, chatHistory, req.Message, lang)
 	if err != nil {
 		return nil, err
 	}

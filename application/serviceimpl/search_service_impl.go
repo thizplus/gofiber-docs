@@ -130,6 +130,7 @@ func (s *SearchServiceImpl) Search(ctx context.Context, userID uuid.UUID, req *d
 			Query:    req.Query,
 			Page:     1,
 			PageSize: 8,
+			Lang:     req.Language,
 		}
 		placeResp, _ := s.SearchPlaces(ctx, userID, placeReq)
 		if placeResp != nil {
@@ -207,8 +208,11 @@ func (s *SearchServiceImpl) SearchWebsites(ctx context.Context, userID uuid.UUID
 		req.PageSize = 10
 	}
 
-	// Check cache first
-	cacheKey := cache.SearchKey(req.Query, "website", req.Page)
+	// Expand query if it's just a province name (e.g., "สกลนคร" -> "สกลนคร สถานที่ท่องเที่ยว")
+	expandedQuery := ExpandSearchQuery(req.Query, req.Language)
+
+	// Check cache first (use expanded query for cache key)
+	cacheKey := cache.SearchKey(expandedQuery, "website", req.Page)
 	if cached, err := s.redisClient.Get(ctx, cacheKey).Result(); err == nil {
 		var cachedResult dto.WebsiteSearchResponse
 		if json.Unmarshal([]byte(cached), &cachedResult) == nil {
@@ -218,7 +222,7 @@ func (s *SearchServiceImpl) SearchWebsites(ctx context.Context, userID uuid.UUID
 	}
 
 	// Cache miss - call API
-	searchResponse, err := s.googleSearch.SearchAll(ctx, req.Query, req.Page, req.PageSize)
+	searchResponse, err := s.googleSearch.SearchAll(ctx, expandedQuery, req.Page, req.PageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -260,8 +264,12 @@ func (s *SearchServiceImpl) SearchImages(ctx context.Context, userID uuid.UUID, 
 		req.PageSize = 10
 	}
 
-	// Check cache first
-	cacheKey := cache.ImageSearchKey(req.Query, req.Page)
+	// Expand query if it's just a province name (e.g., "สกลนคร" -> "สกลนคร สถานที่ท่องเที่ยว")
+	// Note: ImageSearchRequest doesn't have Language field, defaults to Thai
+	expandedQuery := ExpandSearchQuery(req.Query, "")
+
+	// Check cache first (use expanded query for cache key)
+	cacheKey := cache.ImageSearchKey(expandedQuery, req.Page)
 	if cached, err := s.redisClient.Get(ctx, cacheKey).Result(); err == nil {
 		var cachedResult dto.ImageSearchResponse
 		if json.Unmarshal([]byte(cached), &cachedResult) == nil {
@@ -271,7 +279,7 @@ func (s *SearchServiceImpl) SearchImages(ctx context.Context, userID uuid.UUID, 
 	}
 
 	// Cache miss - call API
-	searchResponse, err := s.googleSearch.SearchImages(ctx, req.Query, req.Page, req.PageSize)
+	searchResponse, err := s.googleSearch.SearchImages(ctx, expandedQuery, req.Page, req.PageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -329,8 +337,12 @@ func (s *SearchServiceImpl) SearchVideos(ctx context.Context, userID uuid.UUID, 
 		req.Order = "relevance"
 	}
 
-	// Check cache first
-	cacheKey := cache.YouTubeKey(req.Query, req.PageSize)
+	// Expand query if it's just a province name (e.g., "สกลนคร" -> "สกลนคร สถานที่ท่องเที่ยว")
+	// Note: VideoSearchRequest doesn't have Language field, defaults to Thai
+	expandedQuery := ExpandSearchQuery(req.Query, "")
+
+	// Check cache first (use expanded query for cache key)
+	cacheKey := cache.YouTubeKey(expandedQuery, req.PageSize)
 	if cached, err := s.redisClient.Get(ctx, cacheKey).Result(); err == nil {
 		var cachedResult dto.VideoSearchResponse
 		if json.Unmarshal([]byte(cached), &cachedResult) == nil {
@@ -341,7 +353,7 @@ func (s *SearchServiceImpl) SearchVideos(ctx context.Context, userID uuid.UUID, 
 
 	// Cache miss - call API
 	searchReq := &google.VideoSearchRequest{
-		Query:      req.Query,
+		Query:      expandedQuery,
 		MaxResults: req.PageSize,
 		Order:      req.Order,
 	}
@@ -486,20 +498,30 @@ func (s *SearchServiceImpl) GetVideoDetails(ctx context.Context, videoID string)
 }
 
 func (s *SearchServiceImpl) SearchPlaces(ctx context.Context, userID uuid.UUID, req *dto.PlaceSearchRequest) (*dto.PlaceSearchResponse, error) {
+	// Expand query if it's just a province name (e.g., "สกลนคร" -> "สกลนคร สถานที่ท่องเที่ยว")
+	expandedQuery := ExpandSearchQuery(req.Query, req.Lang)
+
 	// Determine search type: Text Search (no lat/lng) or Nearby Search (with lat/lng)
 	useTextSearch := req.Lat == 0 && req.Lng == 0
 
+	// Get language from request, default to Thai
+	lang := req.Lang
+	if lang == "" {
+		lang = "th"
+	}
+
 	var cacheKey string
 	if useTextSearch {
-		cacheKey = cache.PlaceTextSearchKey(req.Query)
+		cacheKey = cache.PlaceTextSearchKey(expandedQuery, lang)
 	} else {
 		if req.Radius == 0 {
 			req.Radius = 5000
 		}
-		cacheKey = cache.NearbyPlacesKey(req.Lat, req.Lng, req.Radius, req.PlaceType, req.Query)
+		cacheKey = cache.NearbyPlacesKey(req.Lat, req.Lng, req.Radius, req.PlaceType, expandedQuery, lang)
 	}
 
-	// Check cache first
+
+	// Check cache first (use expanded query for cache key)
 	if cached, err := s.redisClient.Get(ctx, cacheKey).Result(); err == nil {
 		var cachedResult dto.PlaceSearchResponse
 		if json.Unmarshal([]byte(cached), &cachedResult) == nil {
@@ -515,19 +537,20 @@ func (s *SearchServiceImpl) SearchPlaces(ctx context.Context, userID uuid.UUID, 
 	if useTextSearch {
 		// Text Search - search by query text only (like Google Maps search)
 		textReq := &google.TextSearchRequest{
-			Query:    req.Query,
-			Language: "th",
+			Query:    expandedQuery,
+			Language: lang,
 			Region:   "th",
 		}
 		searchResponse, err = s.googlePlaces.TextSearch(ctx, textReq)
 	} else {
 		// Nearby Search - search by location
 		nearbyReq := &google.NearbySearchRequest{
-			Lat:     req.Lat,
-			Lng:     req.Lng,
-			Radius:  req.Radius,
-			Type:    req.PlaceType,
-			Keyword: req.Query,
+			Lat:      req.Lat,
+			Lng:      req.Lng,
+			Radius:   req.Radius,
+			Type:     req.PlaceType,
+			Keyword:  expandedQuery,
+			Language: lang,
 		}
 		searchResponse, err = s.googlePlaces.NearbySearch(ctx, nearbyReq)
 	}
@@ -579,7 +602,7 @@ func (s *SearchServiceImpl) SearchPlaces(ctx context.Context, userID uuid.UUID, 
 	}
 
 	response := &dto.PlaceSearchResponse{
-		Query:      req.Query,
+		Query:      expandedQuery,
 		Results:    placeResults,
 		TotalCount: int64(len(placeResults)),
 		Page:       req.Page,
@@ -597,9 +620,14 @@ func (s *SearchServiceImpl) SearchPlaces(ctx context.Context, userID uuid.UUID, 
 	return response, nil
 }
 
-func (s *SearchServiceImpl) GetPlaceDetails(ctx context.Context, placeID string, userLat, userLng float64) (*dto.PlaceDetailResponse, error) {
+func (s *SearchServiceImpl) GetPlaceDetails(ctx context.Context, placeID string, userLat, userLng float64, lang string) (*dto.PlaceDetailResponse, error) {
+	// Default to Thai if no language specified
+	if lang == "" {
+		lang = "th"
+	}
+
 	// Check cache first (without distance - distance calculated per user)
-	cacheKey := cache.PlaceDetailsKey(placeID)
+	cacheKey := cache.PlaceDetailsKey(placeID, lang)
 	if cached, err := s.redisClient.Get(ctx, cacheKey).Result(); err == nil {
 		var cachedResult dto.PlaceDetailResponse
 		if json.Unmarshal([]byte(cached), &cachedResult) == nil {
@@ -615,7 +643,8 @@ func (s *SearchServiceImpl) GetPlaceDetails(ctx context.Context, placeID string,
 
 	// Cache miss - call API
 	detailsReq := &google.PlaceDetailsRequest{
-		PlaceID: placeID,
+		PlaceID:  placeID,
+		Language: lang,
 	}
 
 	detailsResponse, err := s.googlePlaces.GetPlaceDetails(ctx, detailsReq)
@@ -687,8 +716,17 @@ func (s *SearchServiceImpl) SearchNearbyPlaces(ctx context.Context, req *dto.Nea
 		req.Radius = 5000
 	}
 
-	// Check cache first
-	cacheKey := cache.NearbyPlacesKey(req.Lat, req.Lng, req.Radius, req.PlaceType, req.Keyword)
+	// Get language from request, default to Thai
+	lang := req.Lang
+	if lang == "" {
+		lang = "th"
+	}
+
+	// Expand query if it's just a province name (e.g., "สกลนคร" -> "สกลนคร สถานที่ท่องเที่ยว")
+	expandedKeyword := ExpandSearchQuery(req.Keyword, lang)
+
+	// Check cache first (use expanded query for cache key)
+	cacheKey := cache.NearbyPlacesKey(req.Lat, req.Lng, req.Radius, req.PlaceType, expandedKeyword, lang)
 	if cached, err := s.redisClient.Get(ctx, cacheKey).Result(); err == nil {
 		var cachedResult dto.PlaceSearchResponse
 		if json.Unmarshal([]byte(cached), &cachedResult) == nil {
@@ -698,11 +736,12 @@ func (s *SearchServiceImpl) SearchNearbyPlaces(ctx context.Context, req *dto.Nea
 
 	// Cache miss - call API
 	searchReq := &google.NearbySearchRequest{
-		Lat:     req.Lat,
-		Lng:     req.Lng,
-		Radius:  req.Radius,
-		Type:    req.PlaceType,
-		Keyword: req.Keyword,
+		Lat:      req.Lat,
+		Lng:      req.Lng,
+		Radius:   req.Radius,
+		Type:     req.PlaceType,
+		Keyword:  expandedKeyword,
+		Language: lang,
 	}
 
 	searchResponse, err := s.googlePlaces.NearbySearch(ctx, searchReq)
@@ -857,9 +896,14 @@ var generatingMutex = &sync.Mutex{}
 
 // GetPlaceDetailsEnhanced returns place details with AI-generated content
 // Returns immediately - AI content generates in background if not cached
-func (s *SearchServiceImpl) GetPlaceDetailsEnhanced(ctx context.Context, placeID string, userLat, userLng float64, includeAI bool) (*dto.PlaceDetailEnhancedResponse, error) {
+func (s *SearchServiceImpl) GetPlaceDetailsEnhanced(ctx context.Context, placeID string, userLat, userLng float64, lang string, includeAI bool) (*dto.PlaceDetailEnhancedResponse, error) {
+	// Default to Thai if no language specified
+	if lang == "" {
+		lang = "th"
+	}
+
 	// 1. Get basic place details first
-	basicDetails, err := s.GetPlaceDetails(ctx, placeID, userLat, userLng)
+	basicDetails, err := s.GetPlaceDetails(ctx, placeID, userLat, userLng, lang)
 	if err != nil {
 		return nil, err
 	}
@@ -891,8 +935,8 @@ func (s *SearchServiceImpl) GetPlaceDetailsEnhanced(ctx context.Context, placeID
 		return response, nil
 	}
 
-	// 2. Check if AI content exists in database
-	aiContent, err := s.placeAIContentRepo.GetByPlaceID(ctx, placeID)
+	// 2. Check if AI content exists in database for this language
+	aiContent, err := s.placeAIContentRepo.GetByPlaceIDAndLanguage(ctx, placeID, lang)
 	if err == nil && aiContent != nil {
 		// Found in database - use cached content
 		response.AIStatus = "ready"
@@ -902,12 +946,13 @@ func (s *SearchServiceImpl) GetPlaceDetailsEnhanced(ctx context.Context, placeID
 		return response, nil
 	}
 
-	// 3. Check if already generating
+	// 3. Check if already generating (use placeID:lang as key)
+	generatingKey := placeID + ":" + lang
 	generatingMutex.Lock()
-	isGenerating := generatingPlaces[placeID]
+	isGenerating := generatingPlaces[generatingKey]
 	if !isGenerating {
 		// Mark as generating
-		generatingPlaces[placeID] = true
+		generatingPlaces[generatingKey] = true
 	}
 	generatingMutex.Unlock()
 
@@ -917,58 +962,77 @@ func (s *SearchServiceImpl) GetPlaceDetailsEnhanced(ctx context.Context, placeID
 		return response, nil
 	}
 
-	// 4. Start background generation
+	// 4. Start background generation with language
 	response.AIStatus = "generating"
-	go s.generateAIContentBackground(placeID, basicDetails)
+	go s.generateAIContentBackground(placeID, basicDetails, lang)
 
 	return response, nil
 }
 
 // generateAIContentBackground generates AI content in background
-func (s *SearchServiceImpl) generateAIContentBackground(placeID string, basicDetails *dto.PlaceDetailResponse) {
+func (s *SearchServiceImpl) generateAIContentBackground(placeID string, basicDetails *dto.PlaceDetailResponse, lang string) {
 	// Create a new context for background operation
 	ctx := context.Background()
+
+	// Default to Thai if no language specified
+	if lang == "" {
+		lang = "th"
+	}
+
+	// Use placeID:lang as the key to track generation per language
+	generatingKey := placeID + ":" + lang
 
 	defer func() {
 		// Remove from generating map when done
 		generatingMutex.Lock()
-		delete(generatingPlaces, placeID)
+		delete(generatingPlaces, generatingKey)
 		generatingMutex.Unlock()
 	}()
 
 	// Generate AI content
-	aiContent, err := s.generateAIContent(ctx, basicDetails)
+	aiContent, err := s.generateAIContent(ctx, basicDetails, lang)
 	if err != nil {
-		fmt.Printf("Background: Failed to generate AI content for place %s: %v\n", placeID, err)
+		fmt.Printf("Background: Failed to generate AI content for place %s (lang=%s): %v\n", placeID, lang, err)
 		return
 	}
 
 	// Save to database
 	if err := s.placeAIContentRepo.Upsert(ctx, aiContent); err != nil {
-		fmt.Printf("Background: Failed to save AI content for place %s: %v\n", placeID, err)
+		fmt.Printf("Background: Failed to save AI content for place %s (lang=%s): %v\n", placeID, lang, err)
 		return
 	}
 
-	fmt.Printf("Background: Successfully generated AI content for place %s\n", placeID)
+	fmt.Printf("Background: Successfully generated AI content for place %s (lang=%s)\n", placeID, lang)
 }
 
 // generateAIContent generates AI content for a place
-func (s *SearchServiceImpl) generateAIContent(ctx context.Context, place *dto.PlaceDetailResponse) (*models.PlaceAIContent, error) {
+func (s *SearchServiceImpl) generateAIContent(ctx context.Context, place *dto.PlaceDetailResponse, lang string) (*models.PlaceAIContent, error) {
+	// Default to Thai if no language specified
+	if lang == "" {
+		lang = "th"
+	}
+
 	// Generate AI overview using OpenAI
-	aiOverview, err := s.generateAIOverview(ctx, place)
+	aiOverview, err := s.generateAIOverview(ctx, place, lang)
 	if err != nil {
 		return nil, fmt.Errorf("generate AI overview: %w", err)
 	}
 
 	// Generate guide info using OpenAI
-	guideInfo, err := s.generateGuideInfo(ctx, place)
+	guideInfo, err := s.generateGuideInfo(ctx, place, lang)
 	if err != nil {
 		// Don't fail, just skip guide info
 		fmt.Printf("Failed to generate guide info: %v\n", err)
 	}
 
-	// Get related videos from YouTube
-	videos, err := s.getRelatedVideos(ctx, place.Name)
+	// Get related videos from YouTube (use language-appropriate search)
+	videoQuery := place.Name
+	if lang == "en" {
+		videoQuery = place.Name + " travel"
+	} else {
+		videoQuery = place.Name + " ท่องเที่ยว"
+	}
+	videos, err := s.getRelatedVideos(ctx, videoQuery)
 	if err != nil {
 		// Don't fail, just skip videos
 		fmt.Printf("Failed to get related videos: %v\n", err)
@@ -995,7 +1059,7 @@ func (s *SearchServiceImpl) generateAIContent(ctx context.Context, place *dto.Pl
 		TalkingPoints:   talkingPointsJSON,
 		CommonQuestions: commonQuestionsJSON,
 		RelatedVideos:   videosJSON,
-		Language:        "th",
+		Language:        lang,
 		GeneratedAt:     time.Now(),
 		ExpiresAt:       time.Now().AddDate(0, 1, 0), // 1 month expiry
 	}
@@ -1004,8 +1068,49 @@ func (s *SearchServiceImpl) generateAIContent(ctx context.Context, place *dto.Pl
 }
 
 // generateAIOverview generates AI overview using OpenAI
-func (s *SearchServiceImpl) generateAIOverview(ctx context.Context, place *dto.PlaceDetailResponse) (*dto.AIPlaceOverview, error) {
-	prompt := fmt.Sprintf(`คุณเป็นมัคคุเทศก์ผู้เชี่ยวชาญด้านการท่องเที่ยวไทย กรุณาสร้างข้อมูลที่ละเอียดและมีประโยชน์เกี่ยวกับสถานที่นี้:
+func (s *SearchServiceImpl) generateAIOverview(ctx context.Context, place *dto.PlaceDetailResponse, lang string) (*dto.AIPlaceOverview, error) {
+	var prompt, systemPrompt string
+
+	if lang == "en" {
+		prompt = fmt.Sprintf(`You are an expert tour guide specializing in Thai tourism. Please create detailed and useful information about this place:
+
+📍 Place Name: %s
+📍 Location: %s
+📍 Types: %v
+⭐ Rating: %.1f (%d reviews)
+🌐 Coordinates: %.6f, %.6f
+
+Please create information in JSON format:
+{
+    "summary": "A comprehensive and interesting overview of the place. Explain what this place is, its significance, and why tourists should visit (5-7 sentences, approximately 150-200 words)",
+    "history": "Detailed historical background including founding year, founders, important events, and evolution throughout history (2-3 paragraphs, approximately 200-300 words)",
+    "highlights": [
+        "Highlight 1 - Brief explanation of what makes it special",
+        "Highlight 2 - Unique features of this place",
+        "Highlight 3 - Must-do activities or experiences",
+        "Highlight 4 - Outstanding architecture/art/nature",
+        "Highlight 5 - What sets it apart from other places"
+    ],
+    "bestTimeToVisit": "Best time to visit including season, time of day, and reasons (2-3 sentences)",
+    "tips": [
+        "Tip 1 - Preparation before visiting",
+        "Tip 2 - Dress code and etiquette",
+        "Tip 3 - Best photo spots",
+        "Tip 4 - Nearby restaurants and accommodations",
+        "Tip 5 - Transportation and parking",
+        "Tip 6 - Costs and recommended duration"
+    ]
+}
+
+⚠️ Important rules:
+- Respond in English only
+- Information must be accurate. If uncertain, indicate "Please verify this information"
+- Content must be detailed and useful for tour guides
+- Respond with JSON only, no other text`, place.Name, place.FormattedAddress, place.Types, place.Rating, place.ReviewCount, place.Lat, place.Lng)
+
+		systemPrompt = "You are an expert tour guide specializing in Thai tourism with over 20 years of experience. You have deep knowledge of history, culture, and tourist attractions throughout Thailand. Provide accurate, detailed, and useful information for tour guiding."
+	} else {
+		prompt = fmt.Sprintf(`คุณเป็นมัคคุเทศก์ผู้เชี่ยวชาญด้านการท่องเที่ยวไทย กรุณาสร้างข้อมูลที่ละเอียดและมีประโยชน์เกี่ยวกับสถานที่นี้:
 
 📍 ชื่อสถานที่: %s
 📍 ที่ตั้ง: %s
@@ -1041,8 +1146,11 @@ func (s *SearchServiceImpl) generateAIOverview(ctx context.Context, place *dto.P
 - เนื้อหาต้องละเอียดและเป็นประโยชน์สำหรับมัคคุเทศก์
 - ตอบเฉพาะ JSON เท่านั้น ไม่ต้องมีข้อความอื่น`, place.Name, place.FormattedAddress, place.Types, place.Rating, place.ReviewCount, place.Lat, place.Lng)
 
+		systemPrompt = "คุณเป็นมัคคุเทศก์ผู้เชี่ยวชาญด้านการท่องเที่ยวไทยที่มีประสบการณ์มากกว่า 20 ปี คุณมีความรู้ลึกซึ้งเกี่ยวกับประวัติศาสตร์ วัฒนธรรม และสถานที่ท่องเที่ยวทั่วประเทศไทย ให้ข้อมูลที่ถูกต้อง ละเอียด และเป็นประโยชน์สำหรับการนำเที่ยว"
+	}
+
 	messages := []openai.ChatMessage{
-		{Role: "system", Content: "คุณเป็นมัคคุเทศก์ผู้เชี่ยวชาญด้านการท่องเที่ยวไทยที่มีประสบการณ์มากกว่า 20 ปี คุณมีความรู้ลึกซึ้งเกี่ยวกับประวัติศาสตร์ วัฒนธรรม และสถานที่ท่องเที่ยวทั่วประเทศไทย ให้ข้อมูลที่ถูกต้อง ละเอียด และเป็นประโยชน์สำหรับการนำเที่ยว"},
+		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: prompt},
 	}
 
@@ -1076,8 +1184,50 @@ func (s *SearchServiceImpl) generateAIOverview(ctx context.Context, place *dto.P
 }
 
 // generateGuideInfo generates guide info using OpenAI
-func (s *SearchServiceImpl) generateGuideInfo(ctx context.Context, place *dto.PlaceDetailResponse) (*dto.PlaceGuideInfo, error) {
-	prompt := fmt.Sprintf(`คุณเป็นมัคคุเทศก์มืออาชีพ กรุณาสร้างข้อมูลที่เป็นประโยชน์สำหรับการนำเที่ยวที่:
+func (s *SearchServiceImpl) generateGuideInfo(ctx context.Context, place *dto.PlaceDetailResponse, lang string) (*dto.PlaceGuideInfo, error) {
+	var prompt, systemPrompt string
+
+	if lang == "en" {
+		prompt = fmt.Sprintf(`You are a professional tour guide. Please create useful information for guiding tourists at:
+
+📍 Place: %s
+📍 Location: %s
+📍 Types: %v
+
+Please create information in JSON format:
+{
+    "quickFacts": [
+        "Fact 1 - Interesting numbers or statistics (e.g., area, year built, visitor count)",
+        "Fact 2 - Special features or outstanding records (e.g., largest, oldest, first)",
+        "Fact 3 - Information that tourists usually don't know",
+        "Fact 4 - Connection to history or important figures",
+        "Fact 5 - Information that makes this place unique"
+    ],
+    "talkingPoints": [
+        "Point 1 - Interesting stories to tell tourists (2-3 sentences)",
+        "Point 2 - Related legends or tales",
+        "Point 3 - Cultural/religious/historical significance",
+        "Point 4 - Special events or festivals held here",
+        "Point 5 - Comparison with similar places"
+    ],
+    "commonQuestions": [
+        {"question": "Question 1 - About history/origins", "answer": "Detailed and accurate answer (3-4 sentences)"},
+        {"question": "Question 2 - About visiting/costs", "answer": "Detailed answer with useful information"},
+        {"question": "Question 3 - About interesting things to see", "answer": "Answer that helps tourists have a good experience"},
+        {"question": "Question 4 - About rules or etiquette", "answer": "Answer that helps visitors behave appropriately"},
+        {"question": "Question 5 - Other frequently asked questions", "answer": "Complete and useful answer"}
+    ]
+}
+
+⚠️ Important rules:
+- Respond in English only
+- Information must be accurate and useful for real tour guides
+- Answers in commonQuestions must be detailed enough to answer tourists
+- Respond with JSON only, no other text`, place.Name, place.FormattedAddress, place.Types)
+
+		systemPrompt = "You are an expert tour guide with over 20 years of experience. You know how to tell engaging stories and understand common tourist questions. Provide detailed and genuinely useful information."
+	} else {
+		prompt = fmt.Sprintf(`คุณเป็นมัคคุเทศก์มืออาชีพ กรุณาสร้างข้อมูลที่เป็นประโยชน์สำหรับการนำเที่ยวที่:
 
 📍 สถานที่: %s
 📍 ที่ตั้ง: %s
@@ -1114,8 +1264,11 @@ func (s *SearchServiceImpl) generateGuideInfo(ctx context.Context, place *dto.Pl
 - คำตอบใน commonQuestions ต้องละเอียดพอที่จะตอบนักท่องเที่ยวได้
 - ตอบเฉพาะ JSON เท่านั้น ไม่ต้องมีข้อความอื่น`, place.Name, place.FormattedAddress, place.Types)
 
+		systemPrompt = "คุณเป็นมัคคุเทศก์ผู้เชี่ยวชาญที่มีประสบการณ์นำเที่ยวมากกว่า 20 ปี คุณรู้วิธีเล่าเรื่องให้น่าสนใจและรู้คำถามที่นักท่องเที่ยวมักถาม ให้ข้อมูลที่ละเอียดและเป็นประโยชน์จริง"
+	}
+
 	messages := []openai.ChatMessage{
-		{Role: "system", Content: "คุณเป็นมัคคุเทศก์ผู้เชี่ยวชาญที่มีประสบการณ์นำเที่ยวมากกว่า 20 ปี คุณรู้วิธีเล่าเรื่องให้น่าสนใจและรู้คำถามที่นักท่องเที่ยวมักถาม ให้ข้อมูลที่ละเอียดและเป็นประโยชน์จริง"},
+		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: prompt},
 	}
 
@@ -1144,9 +1297,9 @@ func (s *SearchServiceImpl) generateGuideInfo(ctx context.Context, place *dto.Pl
 }
 
 // getRelatedVideos gets related YouTube videos
-func (s *SearchServiceImpl) getRelatedVideos(ctx context.Context, placeName string) ([]dto.RelatedVideo, error) {
+func (s *SearchServiceImpl) getRelatedVideos(ctx context.Context, searchQuery string) ([]dto.RelatedVideo, error) {
 	searchReq := &google.VideoSearchRequest{
-		Query:      placeName + " ท่องเที่ยว",
+		Query:      searchQuery,
 		MaxResults: 5,
 		Order:      "relevance",
 	}

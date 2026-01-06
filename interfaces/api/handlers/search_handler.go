@@ -130,8 +130,9 @@ func (h *SearchHandler) GetPlaceDetails(c *fiber.Ctx) error {
 
 	userLat := c.QueryFloat("lat", 0)
 	userLng := c.QueryFloat("lng", 0)
+	lang := c.Query("lang", "th") // Default to Thai
 
-	result, err := h.searchService.GetPlaceDetails(c.Context(), placeID, userLat, userLng)
+	result, err := h.searchService.GetPlaceDetails(c.Context(), placeID, userLat, userLng, lang)
 	if err != nil {
 		return utils.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to get place details", err)
 	}
@@ -149,12 +150,13 @@ func (h *SearchHandler) GetPlaceDetailsEnhanced(c *fiber.Ctx) error {
 
 	userLat := c.QueryFloat("lat", 0)
 	userLng := c.QueryFloat("lng", 0)
+	lang := c.Query("lang", "th") // Default to Thai
 
 	// Check if user is authenticated for AI features
 	_, userErr := utils.GetUserFromContext(c)
 	includeAI := userErr == nil // Only include AI for authenticated users
 
-	result, err := h.searchService.GetPlaceDetailsEnhanced(c.Context(), placeID, userLat, userLng, includeAI)
+	result, err := h.searchService.GetPlaceDetailsEnhanced(c.Context(), placeID, userLat, userLng, lang, includeAI)
 	if err != nil {
 		return utils.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to get enhanced place details", err)
 	}
