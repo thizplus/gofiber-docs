@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"gofiber-template/pkg/logger"
 )
 
 const (
@@ -76,12 +78,20 @@ type Usage struct {
 
 // Chat sends a chat completion request
 func (c *AIClient) Chat(ctx context.Context, messages []ChatMessage, maxTokens int, temperature float64) (*ChatResponse, error) {
+	startTime := time.Now()
+
 	if maxTokens == 0 {
 		maxTokens = 2000
 	}
 	if temperature == 0 {
 		temperature = 0.7
 	}
+
+	logger.InfoContext(ctx, "OpenAI Chat request started",
+		"model", c.model,
+		"message_count", len(messages),
+		"max_tokens", maxTokens,
+	)
 
 	reqBody := ChatRequest{
 		Model:       c.model,
@@ -92,11 +102,17 @@ func (c *AIClient) Chat(ctx context.Context, messages []ChatMessage, maxTokens i
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
+		logger.ErrorContext(ctx, "OpenAI request marshal failed",
+			"error", err.Error(),
+		)
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", openaiChatURL, bytes.NewBuffer(jsonBody))
 	if err != nil {
+		logger.ErrorContext(ctx, "OpenAI request creation failed",
+			"error", err.Error(),
+		)
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
@@ -105,19 +121,50 @@ func (c *AIClient) Chat(ctx context.Context, messages []ChatMessage, maxTokens i
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		logger.ErrorContext(ctx, "OpenAI HTTP request failed",
+			"error", err.Error(),
+			"model", c.model,
+			"response_time_ms", time.Since(startTime).Milliseconds(),
+		)
 		return nil, fmt.Errorf("execute request: %w", err)
 	}
 	defer resp.Body.Close()
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logger.ErrorContext(ctx, "OpenAI response read failed",
+			"error", err.Error(),
+			"status_code", resp.StatusCode,
+		)
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		logger.ErrorContext(ctx, "OpenAI API error response",
+			"status_code", resp.StatusCode,
+			"response_body", string(body),
+			"model", c.model,
+			"response_time_ms", time.Since(startTime).Milliseconds(),
+		)
 		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
 	var result ChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
+		logger.ErrorContext(ctx, "OpenAI response parse failed",
+			"error", err.Error(),
+			"response_body", string(body),
+		)
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
+
+	logger.InfoContext(ctx, "OpenAI Chat request completed",
+		"model", c.model,
+		"prompt_tokens", result.Usage.PromptTokens,
+		"completion_tokens", result.Usage.CompletionTokens,
+		"total_tokens", result.Usage.TotalTokens,
+		"response_time_ms", time.Since(startTime).Milliseconds(),
+	)
 
 	return &result, nil
 }
@@ -169,6 +216,12 @@ Respond in English and use Markdown format.`
 
 // GenerateTravelSummary generates a travel summary from search results
 func (c *AIClient) GenerateTravelSummary(ctx context.Context, query string, searchResults []SearchResultContext, lang string) (*ChatResponse, error) {
+	logger.InfoContext(ctx, "GenerateTravelSummary started",
+		"query", query,
+		"lang", lang,
+		"search_results_count", len(searchResults),
+	)
+
 	systemPrompt := GetSystemPromptByLang(lang)
 
 	// Build user prompt with search results
@@ -194,11 +247,32 @@ func (c *AIClient) GenerateTravelSummary(ctx context.Context, query string, sear
 		{Role: "user", Content: userPrompt},
 	}
 
-	return c.Chat(ctx, messages, 2000, 0.7)
+	response, err := c.Chat(ctx, messages, 2000, 0.7)
+	if err != nil {
+		logger.ErrorContext(ctx, "GenerateTravelSummary failed",
+			"query", query,
+			"lang", lang,
+			"error", err.Error(),
+		)
+		return nil, err
+	}
+
+	logger.InfoContext(ctx, "GenerateTravelSummary completed",
+		"query", query,
+		"lang", lang,
+	)
+
+	return response, nil
 }
 
 // ContinueChat continues an existing chat conversation
 func (c *AIClient) ContinueChat(ctx context.Context, history []ChatMessage, newMessage string, lang string) (*ChatResponse, error) {
+	logger.InfoContext(ctx, "ContinueChat started",
+		"lang", lang,
+		"history_count", len(history),
+		"new_message_length", len(newMessage),
+	)
+
 	systemPrompt := GetChatSystemPromptByLang(lang)
 
 	messages := []ChatMessage{
@@ -207,5 +281,19 @@ func (c *AIClient) ContinueChat(ctx context.Context, history []ChatMessage, newM
 	messages = append(messages, history...)
 	messages = append(messages, ChatMessage{Role: "user", Content: newMessage})
 
-	return c.Chat(ctx, messages, 1500, 0.7)
+	response, err := c.Chat(ctx, messages, 1500, 0.7)
+	if err != nil {
+		logger.ErrorContext(ctx, "ContinueChat failed",
+			"lang", lang,
+			"history_count", len(history),
+			"error", err.Error(),
+		)
+		return nil, err
+	}
+
+	logger.InfoContext(ctx, "ContinueChat completed",
+		"lang", lang,
+	)
+
+	return response, nil
 }

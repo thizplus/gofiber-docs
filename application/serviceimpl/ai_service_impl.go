@@ -18,6 +18,7 @@ import (
 	"gofiber-template/infrastructure/cache"
 	"gofiber-template/infrastructure/external/google"
 	"gofiber-template/infrastructure/external/openai"
+	"gofiber-template/pkg/logger"
 )
 
 type AIServiceImpl struct {
@@ -48,11 +49,24 @@ func NewAIService(
 }
 
 func (s *AIServiceImpl) AISearch(ctx context.Context, userID uuid.UUID, req *dto.AISearchRequest) (*dto.AISearchResponse, error) {
+	startTime := time.Now()
+
+	logger.InfoContext(ctx, "AI Search started",
+		"user_id", userID.String(),
+		"query", req.Query,
+		"lang", req.Language,
+	)
+
 	// Check cache first (AI responses are expensive!)
 	cacheKey := cache.SearchAIKey(req.Query)
 	if cached, err := s.redisClient.Get(ctx, cacheKey).Result(); err == nil {
 		var cachedResult dto.AISearchResponse
 		if json.Unmarshal([]byte(cached), &cachedResult) == nil {
+			logger.InfoContext(ctx, "AI Search cache hit",
+				"user_id", userID.String(),
+				"query", req.Query,
+				"response_time_ms", time.Since(startTime).Milliseconds(),
+			)
 			// Save search history even for cached results
 			if userID != uuid.Nil {
 				history := &models.SearchHistory{
@@ -70,8 +84,20 @@ func (s *AIServiceImpl) AISearch(ctx context.Context, userID uuid.UUID, req *dto
 	// Cache miss - Get search results from Google
 	searchResponse, err := s.googleSearch.SearchAll(ctx, req.Query, 1, 5)
 	if err != nil {
+		logger.ErrorContext(ctx, "AI Search - Google Search failed",
+			"user_id", userID.String(),
+			"query", req.Query,
+			"error", err.Error(),
+			"response_time_ms", time.Since(startTime).Milliseconds(),
+		)
 		return nil, err
 	}
+
+	logger.InfoContext(ctx, "AI Search - Google Search completed",
+		"user_id", userID.String(),
+		"query", req.Query,
+		"results_count", len(searchResponse.Items),
+	)
 
 	// Prepare sources and search context
 	var sources []dto.MessageSource
@@ -98,6 +124,13 @@ func (s *AIServiceImpl) AISearch(ctx context.Context, userID uuid.UUID, req *dto
 	// Generate AI summary
 	aiResponse, err := s.aiClient.GenerateTravelSummary(ctx, req.Query, searchContext, lang)
 	if err != nil {
+		logger.ErrorContext(ctx, "AI Search - OpenAI failed",
+			"user_id", userID.String(),
+			"query", req.Query,
+			"lang", lang,
+			"error", err.Error(),
+			"response_time_ms", time.Since(startTime).Milliseconds(),
+		)
 		return nil, err
 	}
 
@@ -129,10 +162,25 @@ func (s *AIServiceImpl) AISearch(ctx context.Context, userID uuid.UUID, req *dto
 		_ = s.historyRepo.Create(ctx, history)
 	}
 
+	logger.InfoContext(ctx, "AI Search completed",
+		"user_id", userID.String(),
+		"query", req.Query,
+		"sources_count", len(sources),
+		"response_time_ms", time.Since(startTime).Milliseconds(),
+	)
+
 	return response, nil
 }
 
 func (s *AIServiceImpl) CreateChatSession(ctx context.Context, userID uuid.UUID, req *dto.CreateAIChatRequest) (*dto.AIChatSessionDetailResponse, error) {
+	startTime := time.Now()
+
+	logger.InfoContext(ctx, "CreateChatSession started",
+		"user_id", userID.String(),
+		"query", req.Query,
+		"lang", req.Lang,
+	)
+
 	// Get language from request, default to Thai
 	lang := req.Lang
 	if lang == "" {
@@ -149,8 +197,17 @@ func (s *AIServiceImpl) CreateChatSession(ctx context.Context, userID uuid.UUID,
 	}
 
 	if err := s.sessionRepo.Create(ctx, session); err != nil {
+		logger.ErrorContext(ctx, "CreateChatSession - session creation failed",
+			"user_id", userID.String(),
+			"error", err.Error(),
+		)
 		return nil, err
 	}
+
+	logger.InfoContext(ctx, "CreateChatSession - session created",
+		"user_id", userID.String(),
+		"session_id", session.ID.String(),
+	)
 
 	// Create user message
 	userMessage := &models.AIChatMessage{
@@ -161,12 +218,23 @@ func (s *AIServiceImpl) CreateChatSession(ctx context.Context, userID uuid.UUID,
 	}
 
 	if err := s.messageRepo.Create(ctx, userMessage); err != nil {
+		logger.ErrorContext(ctx, "CreateChatSession - user message creation failed",
+			"user_id", userID.String(),
+			"session_id", session.ID.String(),
+			"error", err.Error(),
+		)
 		return nil, err
 	}
 
 	// Get search results
 	searchResponse, err := s.googleSearch.SearchAll(ctx, req.Query, 1, 5)
 	if err != nil {
+		logger.ErrorContext(ctx, "CreateChatSession - Google Search failed",
+			"user_id", userID.String(),
+			"session_id", session.ID.String(),
+			"query", req.Query,
+			"error", err.Error(),
+		)
 		return nil, err
 	}
 
@@ -189,6 +257,14 @@ func (s *AIServiceImpl) CreateChatSession(ctx context.Context, userID uuid.UUID,
 	// Generate AI response with language
 	aiResponse, err := s.aiClient.GenerateTravelSummary(ctx, req.Query, searchContext, lang)
 	if err != nil {
+		logger.ErrorContext(ctx, "CreateChatSession - OpenAI failed",
+			"user_id", userID.String(),
+			"session_id", session.ID.String(),
+			"query", req.Query,
+			"lang", lang,
+			"error", err.Error(),
+			"response_time_ms", time.Since(startTime).Milliseconds(),
+		)
 		return nil, err
 	}
 
@@ -209,6 +285,11 @@ func (s *AIServiceImpl) CreateChatSession(ctx context.Context, userID uuid.UUID,
 	}
 
 	if err := s.messageRepo.Create(ctx, assistantMessage); err != nil {
+		logger.ErrorContext(ctx, "CreateChatSession - assistant message creation failed",
+			"user_id", userID.String(),
+			"session_id", session.ID.String(),
+			"error", err.Error(),
+		)
 		return nil, err
 	}
 
@@ -219,19 +300,45 @@ func (s *AIServiceImpl) CreateChatSession(ctx context.Context, userID uuid.UUID,
 	// Get session with messages
 	session, err = s.sessionRepo.GetByIDWithMessages(ctx, session.ID)
 	if err != nil {
+		logger.ErrorContext(ctx, "CreateChatSession - get session with messages failed",
+			"user_id", userID.String(),
+			"session_id", session.ID.String(),
+			"error", err.Error(),
+		)
 		return nil, err
 	}
+
+	logger.InfoContext(ctx, "CreateChatSession completed",
+		"user_id", userID.String(),
+		"session_id", session.ID.String(),
+		"response_time_ms", time.Since(startTime).Milliseconds(),
+	)
 
 	return dto.AIChatSessionToDetailResponse(session), nil
 }
 
 func (s *AIServiceImpl) GetChatSession(ctx context.Context, userID uuid.UUID, sessionID uuid.UUID) (*dto.AIChatSessionDetailResponse, error) {
+	logger.InfoContext(ctx, "GetChatSession",
+		"user_id", userID.String(),
+		"session_id", sessionID.String(),
+	)
+
 	session, err := s.sessionRepo.GetByIDWithMessages(ctx, sessionID)
 	if err != nil {
+		logger.WarnContext(ctx, "GetChatSession - session not found",
+			"user_id", userID.String(),
+			"session_id", sessionID.String(),
+			"error", err.Error(),
+		)
 		return nil, errors.New("session not found")
 	}
 
 	if session.UserID != userID {
+		logger.WarnContext(ctx, "GetChatSession - unauthorized access",
+			"user_id", userID.String(),
+			"session_id", sessionID.String(),
+			"session_owner", session.UserID.String(),
+		)
 		return nil, errors.New("unauthorized")
 	}
 
@@ -239,6 +346,12 @@ func (s *AIServiceImpl) GetChatSession(ctx context.Context, userID uuid.UUID, se
 }
 
 func (s *AIServiceImpl) GetChatSessions(ctx context.Context, userID uuid.UUID, req *dto.GetAIChatSessionsRequest) (*dto.AIChatSessionListResponse, error) {
+	logger.InfoContext(ctx, "GetChatSessions",
+		"user_id", userID.String(),
+		"page", req.Page,
+		"page_size", req.PageSize,
+	)
+
 	if req.Page == 0 {
 		req.Page = 1
 	}
@@ -250,11 +363,19 @@ func (s *AIServiceImpl) GetChatSessions(ctx context.Context, userID uuid.UUID, r
 
 	sessions, err := s.sessionRepo.GetByUserID(ctx, userID, offset, req.PageSize)
 	if err != nil {
+		logger.ErrorContext(ctx, "GetChatSessions failed",
+			"user_id", userID.String(),
+			"error", err.Error(),
+		)
 		return nil, err
 	}
 
 	total, err := s.sessionRepo.CountByUserID(ctx, userID)
 	if err != nil {
+		logger.ErrorContext(ctx, "GetChatSessions - count failed",
+			"user_id", userID.String(),
+			"error", err.Error(),
+		)
 		return nil, err
 	}
 
@@ -274,23 +395,77 @@ func (s *AIServiceImpl) GetChatSessions(ctx context.Context, userID uuid.UUID, r
 }
 
 func (s *AIServiceImpl) DeleteChatSession(ctx context.Context, userID uuid.UUID, sessionID uuid.UUID) error {
+	logger.InfoContext(ctx, "DeleteChatSession",
+		"user_id", userID.String(),
+		"session_id", sessionID.String(),
+	)
+
 	session, err := s.sessionRepo.GetByID(ctx, sessionID)
 	if err != nil {
+		logger.WarnContext(ctx, "DeleteChatSession - session not found",
+			"user_id", userID.String(),
+			"session_id", sessionID.String(),
+			"error", err.Error(),
+		)
 		return errors.New("session not found")
 	}
 
 	if session.UserID != userID {
+		logger.WarnContext(ctx, "DeleteChatSession - unauthorized access",
+			"user_id", userID.String(),
+			"session_id", sessionID.String(),
+			"session_owner", session.UserID.String(),
+		)
 		return errors.New("unauthorized")
 	}
 
-	return s.sessionRepo.Delete(ctx, sessionID)
+	if err := s.sessionRepo.Delete(ctx, sessionID); err != nil {
+		logger.ErrorContext(ctx, "DeleteChatSession failed",
+			"user_id", userID.String(),
+			"session_id", sessionID.String(),
+			"error", err.Error(),
+		)
+		return err
+	}
+
+	logger.InfoContext(ctx, "DeleteChatSession completed",
+		"user_id", userID.String(),
+		"session_id", sessionID.String(),
+	)
+
+	return nil
 }
 
 func (s *AIServiceImpl) ClearAllChatSessions(ctx context.Context, userID uuid.UUID) error {
-	return s.sessionRepo.DeleteByUserID(ctx, userID)
+	logger.InfoContext(ctx, "ClearAllChatSessions",
+		"user_id", userID.String(),
+	)
+
+	if err := s.sessionRepo.DeleteByUserID(ctx, userID); err != nil {
+		logger.ErrorContext(ctx, "ClearAllChatSessions failed",
+			"user_id", userID.String(),
+			"error", err.Error(),
+		)
+		return err
+	}
+
+	logger.InfoContext(ctx, "ClearAllChatSessions completed",
+		"user_id", userID.String(),
+	)
+
+	return nil
 }
 
 func (s *AIServiceImpl) SendMessage(ctx context.Context, userID uuid.UUID, req *dto.SendAIChatMessageRequest) (*dto.AIChatMessageResponse, error) {
+	startTime := time.Now()
+
+	logger.InfoContext(ctx, "SendMessage started",
+		"user_id", userID.String(),
+		"session_id", req.SessionID.String(),
+		"message_length", len(req.Message),
+		"lang", req.Lang,
+	)
+
 	// Get language from request, default to Thai
 	lang := req.Lang
 	if lang == "" {
@@ -299,10 +474,20 @@ func (s *AIServiceImpl) SendMessage(ctx context.Context, userID uuid.UUID, req *
 
 	session, err := s.sessionRepo.GetByID(ctx, req.SessionID)
 	if err != nil {
+		logger.WarnContext(ctx, "SendMessage - session not found",
+			"user_id", userID.String(),
+			"session_id", req.SessionID.String(),
+			"error", err.Error(),
+		)
 		return nil, errors.New("session not found")
 	}
 
 	if session.UserID != userID {
+		logger.WarnContext(ctx, "SendMessage - unauthorized access",
+			"user_id", userID.String(),
+			"session_id", req.SessionID.String(),
+			"session_owner", session.UserID.String(),
+		)
 		return nil, errors.New("unauthorized")
 	}
 
@@ -315,14 +500,30 @@ func (s *AIServiceImpl) SendMessage(ctx context.Context, userID uuid.UUID, req *
 	}
 
 	if err := s.messageRepo.Create(ctx, userMessage); err != nil {
+		logger.ErrorContext(ctx, "SendMessage - user message creation failed",
+			"user_id", userID.String(),
+			"session_id", req.SessionID.String(),
+			"error", err.Error(),
+		)
 		return nil, err
 	}
 
 	// Get recent messages for context
 	recentMessages, err := s.messageRepo.GetRecentBySessionID(ctx, req.SessionID, 10)
 	if err != nil {
+		logger.ErrorContext(ctx, "SendMessage - get recent messages failed",
+			"user_id", userID.String(),
+			"session_id", req.SessionID.String(),
+			"error", err.Error(),
+		)
 		return nil, err
 	}
+
+	logger.InfoContext(ctx, "SendMessage - context loaded",
+		"user_id", userID.String(),
+		"session_id", req.SessionID.String(),
+		"context_messages", len(recentMessages),
+	)
 
 	// Build conversation history
 	var chatHistory []openai.ChatMessage
@@ -357,6 +558,13 @@ func (s *AIServiceImpl) SendMessage(ctx context.Context, userID uuid.UUID, req *
 	// Generate AI response with language
 	aiResponse, err := s.aiClient.ContinueChat(ctx, chatHistory, req.Message, lang)
 	if err != nil {
+		logger.ErrorContext(ctx, "SendMessage - OpenAI failed",
+			"user_id", userID.String(),
+			"session_id", req.SessionID.String(),
+			"lang", lang,
+			"error", err.Error(),
+			"response_time_ms", time.Since(startTime).Milliseconds(),
+		)
 		return nil, err
 	}
 
@@ -377,12 +585,24 @@ func (s *AIServiceImpl) SendMessage(ctx context.Context, userID uuid.UUID, req *
 	}
 
 	if err := s.messageRepo.Create(ctx, assistantMessage); err != nil {
+		logger.ErrorContext(ctx, "SendMessage - assistant message creation failed",
+			"user_id", userID.String(),
+			"session_id", req.SessionID.String(),
+			"error", err.Error(),
+		)
 		return nil, err
 	}
 
 	// Update session
 	session.UpdatedAt = time.Now()
 	_ = s.sessionRepo.Update(ctx, session.ID, session)
+
+	logger.InfoContext(ctx, "SendMessage completed",
+		"user_id", userID.String(),
+		"session_id", req.SessionID.String(),
+		"response_length", len(responseContent),
+		"response_time_ms", time.Since(startTime).Milliseconds(),
+	)
 
 	return dto.AIChatMessageToResponse(assistantMessage), nil
 }

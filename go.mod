@@ -18,6 +18,7 @@ require (
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	golang.org/x/crypto v0.18.0
 	golang.org/x/oauth2 v0.21.0
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gorm.io/datatypes v1.2.0
 	gorm.io/driver/postgres v1.5.4
 	gorm.io/gorm v1.25.6

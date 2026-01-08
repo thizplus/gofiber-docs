@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"time"
+
+	"gofiber-template/pkg/logger"
 )
 
 const (
@@ -88,6 +91,15 @@ type ImageInfo struct {
 
 // Search performs a Google Custom Search
 func (c *SearchClient) Search(ctx context.Context, req *SearchRequest) (*SearchResponse, error) {
+	startTime := time.Now()
+
+	logger.InfoContext(ctx, "Google Search request started",
+		"query", req.Query,
+		"search_type", req.SearchType,
+		"start", req.Start,
+		"num", req.Num,
+	)
+
 	params := url.Values{}
 	params.Set("key", c.apiKey)
 	params.Set("cx", c.searchEngineID)
@@ -117,8 +129,21 @@ func (c *SearchClient) Search(ctx context.Context, req *SearchRequest) (*SearchR
 
 	var result SearchResponse
 	if err := c.doRequest(ctx, searchURL, &result); err != nil {
+		logger.ErrorContext(ctx, "Google Search request failed",
+			"query", req.Query,
+			"error", err.Error(),
+			"response_time_ms", time.Since(startTime).Milliseconds(),
+		)
 		return nil, err
 	}
+
+	logger.InfoContext(ctx, "Google Search request completed",
+		"query", req.Query,
+		"results_count", len(result.Items),
+		"total_results", result.SearchInformation.TotalResults,
+		"search_time_sec", result.SearchInformation.SearchTime,
+		"response_time_ms", time.Since(startTime).Milliseconds(),
+	)
 
 	return &result, nil
 }

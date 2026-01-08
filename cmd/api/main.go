@@ -5,14 +5,22 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
 	"github.com/gofiber/fiber/v2"
 	"gofiber-template/interfaces/api/handlers"
 	"gofiber-template/interfaces/api/middleware"
 	"gofiber-template/interfaces/api/routes"
 	"gofiber-template/pkg/di"
+	"gofiber-template/pkg/logger"
 )
 
 func main() {
+	// Initialize logger
+	if err := logger.Init(logger.DefaultConfig()); err != nil {
+		log.Fatal("Failed to initialize logger:", err)
+	}
+	logger.Info("Logger initialized", "log_file", "logs/app.log")
+
 	// Initialize DI container
 	container := di.NewContainer()
 
